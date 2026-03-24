@@ -12,6 +12,10 @@ Start: python scripts/status_api.py
 Or via systemd: polymarket-status-api.service
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 import json
 import subprocess
 from datetime import datetime, timezone
