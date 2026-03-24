@@ -1,6 +1,6 @@
 # Polymarket Contrarian Bot — Project Context
 
-> Actualizado: 2026-03-24 18:35 UTC
+> Actualizado: 2026-03-25 00:00 UTC
 > Actualizado cada 12h por run_collector.py. Editar manualmente para notas permanentes.
 
 ---
@@ -9,36 +9,75 @@
 
 | Fase | Estado | Descripcion |
 |------|--------|-------------|
-| Fase 1: Data Collection | **COMPLETA** | Collector corriendo, snapshots acumulando |
-| Fase 2: Signal Engine | **COMPLETA** | Engine generando senales con filtros limpios + whale data v2 |
+| Fase 1: Data Collection | **COMPLETA** | Collector corriendo 24/7 en VPS |
+| Fase 2: Signal Engine | **COMPLETA** | Engine con whale data v2 (PMS Agent API activo) |
 | Fase 3: Paper Trading | **EN CURSO** | Reset limpio 2026-03-22. 2 trades abiertos |
+| Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@187.124.45.248 |
 | Fase 4: Dashboard | Pendiente | Next.js en Vercel |
 | Fase 5: Optimizacion | Pendiente | Ajustar thresholds con datos reales |
 
 ---
 
-## Arranque rapido
+## Infraestructura (VPS — PRODUCCION)
 
-```powershell
-python scripts/run_collector.py       # Terminal 1
-python scripts/run_signal_engine.py   # Terminal 2
-python scripts/run_paper_trader.py    # Terminal 3
+**VPS:** kaizen@187.124.45.248 (Ubuntu 24, 2 CPUs, 8GB RAM)
+**Repo:** https://github.com/flippy-03/polymarket-contrarian (privado)
+**Deploy key:** generada en VPS, añadida a GitHub (read-only)
+**SSH desde PC local:** clave en `~/.ssh/id_ed25519` (flippyopenclaw@gmail.com)
+
+### Servicios systemd (arrancan solos al reiniciar)
+
+| Servicio | Script | Log |
+|----------|--------|-----|
+| polymarket-collector | scripts/run_collector.py | logs/collector.log |
+| polymarket-signal-engine | scripts/run_signal_engine.py | logs/signal_engine.log |
+| polymarket-paper-trader | scripts/run_paper_trader.py | logs/paper_trader.log |
+| polymarket-status-api | scripts/status_api.py | logs/status_api.log |
+
+### Status API (para Openclaw)
+
+Puerto 8765, sin auth (solo acceso interno VPS).
+Openclaw (Docker en mismo VPS) accede via `http://host.docker.internal:8765/status`
+
+| Endpoint | Contenido |
+|----------|-----------|
+| GET /status | Estado servicios + portfolio completo (JSON) |
+| GET /logs/collector | Ultimas 50 lineas collector.log |
+| GET /logs/signals | Ultimas 50 lineas signal_engine.log |
+| GET /logs/trader | Ultimas 50 lineas paper_trader.log |
+| GET /healthz | Ping simple |
+
+### Workflow de deploy
+
+```bash
+# Desde PC local: editar -> commit -> push -> pull en VPS
+git push origin main
+ssh kaizen@187.124.45.248 "cd ~/polymarket-contrarian && git pull"
+# Restart servicios (requiere sudo desde Openclaw):
+# sudo systemctl restart polymarket-collector polymarket-signal-engine polymarket-paper-trader
 ```
 
-Verificar en log: `(filtered 795 sports)` confirma filtros activos.
-Los procesos se caen al cerrar VS Code — normal en desarrollo local. En produccion (VPS) correran 24/7.
+### Comandos de operacion (desde PC local sin sudo)
+
+```bash
+# Ver logs en tiempo real
+ssh kaizen@187.124.45.248 "tail -f ~/polymarket-contrarian/logs/collector.log"
+# Ver estado de servicios
+ssh kaizen@187.124.45.248 "systemctl status polymarket-collector polymarket-signal-engine polymarket-paper-trader --no-pager"
+# Ver status via API
+ssh kaizen@187.124.45.248 "curl -s http://localhost:8765/status"
+```
 
 ---
 
-## Stats actuales (2026-03-24 18:31 UTC — auto)
+## Stats actuales (2026-03-25 00:00 UTC)
 
 | Metrica | Valor |
 |---------|-------|
-| Snapshots en DB | 404,547 |
-| Ultimo snapshot | 2026-03-24T18:28 UTC |
-| Mercados totales | 4,388 |
+| Snapshots en DB | 404,547+ (acumulando en VPS) |
+| Mercados totales | ~4,400 |
 | Wallets watched | 29 |
-| Senales generadas | 22 totales (0 activas — expiradas) |
+| Senales generadas | 22 totales (0 activas) |
 | Trades abiertos | 2 ($97.50 en posiciones) |
 | Trades cerrados | 0 (post-reset limpio) |
 | P&L realizado | $0.00 |
@@ -58,15 +97,15 @@ Los procesos se caen al cerrar VS Code — normal en desarrollo local. En produc
 src/
   data/
     polymarket_client.py      # CLOB + Gamma API wrapper
-    polymarketscan_client.py  # PolymarketScan API (rate limit 28 req/min)
+    polymarketscan_client.py  # PolymarketScan Public API (28 req/min)
     market_scanner.py         # Escanea y filtra mercados candidatos
     snapshot_collector.py     # Precio + orderbook cada 2 min
-    whale_trades_collector.py # Whale trades — migrando a Agent API
-    falcon_client.py          # [EN PROGRESO] Falcon herding + whale trades
+    whale_trades_collector.py # Whale trades via PMS Agent API (?action=whales)
+    falcon_client.py          # Falcon herding + whale trades (standby, API rota)
     leaderboard_seeder.py     # Top traders -> watched_wallets
 
   signals/
-    divergence_detector.py    # Herding + velocidad de precio
+    divergence_detector.py    # detect_whale_herding_v2 + detect_price_velocity
     momentum_filter.py        # Score de momentum (0-100)
     contrarian_logic.py       # Smart wallet score + decision de senal
     signal_engine.py          # Combina todo -> DB signals
@@ -86,8 +125,10 @@ scripts/
   run_collector.py            # Entry point Fase 1
   run_signal_engine.py        # Entry point Fase 2
   run_paper_trader.py         # Entry point Fase 3
+  status_api.py               # HTTP API de monitoreo (puerto 8765, para Openclaw)
   run_cleanup.py              # Limpieza diaria
   setup_db.py                 # Verificar conexion y schema
+  test_whale_apis.py          # Test manual de APIs whale
 ```
 
 ---
@@ -98,60 +139,50 @@ scripts/
 - **Polymarket Gamma API** — fuente principal de mercados
 - **Polymarket CLOB API** — precios en tiempo real (404 en AMM-only es normal, en DEBUG)
 - **PolymarketScan Public API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/public-api` (28 req/min)
-- **PolymarketScan Agent API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api` (60 req/min, sin auth). Accion `?action=whales&limit=50&agent_id=contrarian-bot` reemplaza endpoint whale_trades del Public API que devuelvia []
-- **Falcon API** — `https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized` POST. Misma URL base que MCP server. Bearer token en .env. Agent IDs: 575 (Market Insights/herding), 556 (Whale Trades)
+- **PolymarketScan Agent API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api` (60 req/min, sin auth). `?action=whales&limit=50&agent_id=contrarian-bot` reemplaza endpoint whale_trades del Public API que devolvía []
+- **Falcon API** — `https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized` POST. Bearer token en .env. Agent IDs: 575 (Market Insights), 556 (Whale Trades). ESTADO: devuelve 400 por error server-side. Graceful fallback implementado.
 
 ### Integracion whale data (COMPLETA — 2026-03-24)
 
-Prioridad de fuentes para deteccion de herding (implementada en detect_whale_herding_v2):
-1. **Falcon Market Insights** (agent_id=575) — herding por concentracion de wallets. Si top1_wallet_pct > 30% → candidato contrarian fuerte. **ESTADO: endpoint /parameterized devuelve 400 por error server-side (pipeline falla en campo timestamp/category). Implementado con fallback gracioso — retorna vacio. Arquitectura lista para re-activar cuando Falcon lo corrija.**
-2. **PMS Agent API** (action=whales) — **ACTIVO Y FUNCIONANDO**. 50 trades, ~21 mercados por llamada. Cada ciclo del signal engine llama a esta API fresca (no se guarda en snapshots).
-3. **Snapshot-based herding** (detect_whale_herding) — lee whale_direction de DB. Fallback si mercado no aparece en PMS.
-4. **Momentum de precio** (>5% en 1h) — ultimo fallback cuando sample_size == 0
-
-Archivos modificados (2026-03-24):
-- `src/data/falcon_client.py` — CREADO. fetch_herding_candidates() + fetch_whale_trades() con graceful degradation
-- `src/data/whale_trades_collector.py` — migrado de Public API (devolvia []) a Agent API (?action=whales)
-- `src/signals/divergence_detector.py` — detect_whale_herding_v2() con prioridad Falcon > PMS > snapshots > momentum
-- `src/signals/signal_engine.py` — llama Falcon + PMS al inicio de cada ciclo, pasa a detect_whale_herding_v2
-- `src/utils/config.py` — POLYMARKETSCAN_AGENT_API_URL, FALCON_API_URL, FALCON_BEARER_TOKEN
-- `.env` — FALCON_BEARER_TOKEN anadido (mismo JWT del MCP server)
+Prioridad en `detect_whale_herding_v2()`:
+1. **Falcon Market Insights** (agent_id=575) — top1_wallet_pct > 30% = herding fuerte. Standby (API rota server-side).
+2. **PMS Agent API** (action=whales) — ACTIVO. 50 trades, ~21-32 mercados directionales por ciclo.
+3. **Snapshot-based** (detect_whale_herding) — lee whale_direction de DB. Fallback si mercado no aparece en PMS.
+4. **Momentum de precio** (>5% en 1h) — ultimo fallback cuando sample_size == 0.
 
 ### Estrategia
-- **Divergencia proxy v1:** whale herding + velocidad de precio > 5% en 1h
-- **Fallback sin whale data:** velocidad-only >= 5%/1h, divergence_score = vel_norm * 100
-- **Seleccion de mercados:** top 500 por score compuesto = vol*0.3 + proximidad*0.4 + velocidad*0.3 (min vol $1k)
-- **Pesos del score:** divergencia 50%, momentum 30%, smart wallet 20%
-- **Threshold de senal:** 65/100
-- **Categorias excluidas:** sports (filtro por keywords en pregunta, no por campo category que llega vacio)
-- **Ventana de mercados:** 6h a 7d hasta resolucion
+- Divergencia proxy v1: whale herding + velocidad de precio > 5% en 1h
+- Fallback sin whale data: velocidad-only >= 5%/1h, divergence_score = vel_norm * 100
+- Seleccion de mercados: top 500 por score compuesto = vol*0.3 + proximidad*0.4 + velocidad*0.3 (min vol $1k)
+- Pesos del score: divergencia 50%, momentum 30%, smart wallet 20%
+- Threshold de senal: 65/100
+- Categorias excluidas: sports (filtro por keywords en pregunta, no por campo category que llega vacio)
+- Ventana de mercados: 6h a 7d hasta resolucion
 
 ### Risk management
 - Half-Kelly sizing (Kelly x 0.5), max 5% capital por trade
 - Max 5 posiciones abiertas simultaneas
-- Circuit breaker: 3 perdidas consecutivas → pausa 24h
-- Max drawdown: 20% → pausa
+- Circuit breaker: 3 perdidas consecutivas -> pausa 24h
+- Max drawdown: 20% -> pausa
 - Trailing stop: 25% | Take profit: 50%
 
-### Paper trader: precio de entrada (CRITICO para backtesting)
+### Paper trader: precio de entrada (CRITICO)
 - `open_trade()` usa `price_at_signal`, NO el precio actual del mercado
-- **Por que:** en produccion el trader ejecuta segundos despues de la senal. En desarrollo local el PC esta apagado a ratos y el gap puede ser horas — precio actual seria incorrecto
-- **Riesgo si se revierte:** precios de ejecucion irreales sesgarian toda la evaluacion
+- Por que: en produccion el trader ejecuta segundos despues de la senal. En dev local el PC esta apagado a ratos — precio actual seria incorrecto y sesgaría el backtesting
 - `_get_current_price()` sigue usandose en `position_manager.py` para trailing stop/TP (correcto)
 
 ### Filtros de calidad de senales
-- Sports: 795 mercados eliminados por keywords en pregunta (category='' de la API es poco fiable)
+- Sports: ~818 mercados eliminados por keywords en pregunta (category de la API es poco fiable)
 - Precio minimo MIN_ENTRY_PRICE=0.05. Aplica en ambas direcciones:
-  - YES signal: yes_price < 0.05 → skip (entrada sub-penny)
-  - YES signal: yes_price > 0.95 → skip (mercado casi resuelto YES, sin edge)
-  - NO signal: yes_price < 0.05 → skip (mercado casi resuelto NO, sin edge)
-  - NO signal: 1 - yes_price < 0.05 → skip (entrada sub-penny)
+  - YES signal: yes_price < 0.05 -> skip (entrada sub-penny)
+  - YES signal: yes_price > 0.95 -> skip (mercado casi resuelto YES, sin edge)
+  - NO signal: yes_price < 0.05 -> skip (mercado casi resuelto NO, sin edge)
+  - NO signal: 1 - yes_price < 0.05 -> skip (entrada sub-penny)
 
 ### Datos
 - `clobTokenIds` puede llegar como JSON string o lista Python — normalizer maneja ambos
 - Mercados con token IDs < 10 chars se consideran corruptos y se nullean
 - Snapshots sin precio (CLOB 404) se descartan
-- Windows CP1252 no soporta emojis — logs usan ASCII puro
 
 ---
 
@@ -159,12 +190,12 @@ Archivos modificados (2026-03-24):
 
 | Bug | Estado | Descripcion |
 |-----|--------|-------------|
-| whale_trades Public API devuelve [] | **Resuelto (2026-03-24)** | Migrado a Agent API (?action=whales). 50 trades/llamada funcionando |
-| Falcon parameterized endpoint devuelve 400 | Bloqueado (server-side) | Pipeline de Falcon falla internamente. Implementado con graceful fallback. PMS Agent API es la fuente primaria activa |
-| Filtro sports no funcionaba | Resuelto (2026-03-22) | Gamma devuelve category=''. Filtro por keywords |
+| whale_trades Public API devuelve [] | Resuelto (2026-03-24) | Migrado a Agent API. 50 trades/llamada |
+| Falcon parameterized endpoint devuelve 400 | Bloqueado (server-side) | Graceful fallback. PMS Agent API es fuente primaria |
+| Filtro sports no funcionaba | Resuelto (2026-03-22) | Gamma devuelve category vacio. Filtro por keywords |
 | Mercados sub-$0.05 generaban senales | Resuelto (2026-03-22) | MIN_ENTRY_PRICE=0.05 |
 | Senales en mercados casi resueltos | Resuelto (2026-03-23) | Filtro yes_price > 0.95 / < 0.05 |
-| position_manager: RESOLUTION clasificada como TRAILING_STOP | Resuelto (2026-03-22) | _is_resolved() detecta ambas direcciones |
+| position_manager: RESOLUTION como TRAILING_STOP | Resuelto (2026-03-22) | _is_resolved() detecta ambas direcciones |
 | Paper trader usaba precio actual en vez de price_at_signal | Resuelto (2026-03-22) | open_trade() usa price_at_signal |
 | 10 trades contaminados (deportivos + sub-penny) | Resuelto (2026-03-22) | CANCELLED, portfolio reseteado a $1,000 |
 | CLOB 404 masivos | Resuelto (silenciado) | Mercados AMM-only, en DEBUG |
@@ -195,8 +226,8 @@ MIN_ENTRY_PRICE             = 0.05
 
 ## Credenciales y entorno
 
-- `.env` en raiz del proyecto (no commitear)
-- Python 3.11+ requerido, venv en `.venv/`
+- `.env` en raiz del proyecto (no commitear — esta en .gitignore)
+- Python 3.12 en VPS (3.11+ requerido), venv en `.venv/`
 - Supabase URL: `https://pdmmvhshorwfqseattvz.supabase.co`
 - PolymarketScan Public API: `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/public-api`
 - PolymarketScan Agent API: `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api`
@@ -206,13 +237,12 @@ MIN_ENTRY_PRICE             = 0.05
 
 ## Proximo paso inmediato
 
-**Whale data integration: COMPLETA** (2026-03-24)
-- PMS Agent API activo como fuente primaria (50 trades/ciclo)
-- Falcon en standby (error server-side, arquitectura lista)
-- detect_whale_herding_v2 con prioridad Falcon > PMS > snapshots > momentum
-
-**Fase 4 Dashboard (cuando):**
+**Fase 4 Dashboard (cuando se cumplan):**
 - [x] Al menos 1 senal generada
 - [x] Al menos 1 trade abierto
-- [ ] 48h de datos limpios (desde 2026-03-22 22:16 UTC)
+- [x] 48h de datos limpios (desde 2026-03-22 — superado)
 - [ ] Al menos 1 trade limpio cerrado (post-reset)
+
+**Pendientes tecnicos:**
+- `get_active_markets_from_db` sin paginacion (bajo riesgo, monitorizar si DB crece)
+- Falcon API: re-activar cuando corrijan el endpoint /parameterized server-side
