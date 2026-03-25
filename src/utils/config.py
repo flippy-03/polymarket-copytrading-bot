@@ -58,6 +58,7 @@ CIRCUIT_BREAKER_COOLDOWN_HOURS = 24
 TRAILING_STOP_PCT = 0.25
 TAKE_PROFIT_PCT = 0.50
 MAX_DRAWDOWN_PCT = 0.20
+MAX_SIGNAL_DRIFT_PCT = 0.40  # Max relative price drift from signal before hypothesis is invalid
 
 # === TIMING ===
 SNAPSHOT_INTERVAL_SECONDS = 120

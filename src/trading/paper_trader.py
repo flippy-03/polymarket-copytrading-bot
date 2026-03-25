@@ -10,7 +10,7 @@ from src.trading.risk_manager import (
     is_trading_allowed,
     kelly_position_size,
 )
-from src.utils.config import TRAILING_STOP_PCT, TAKE_PROFIT_PCT
+from src.utils.config import TRAILING_STOP_PCT, TAKE_PROFIT_PCT, MAX_SIGNAL_DRIFT_PCT
 from src.utils.logger import logger
 
 
@@ -61,6 +61,22 @@ def open_trade(signal: dict) -> dict | None:
     if entry_price <= 0 or entry_price >= 1:
         logger.warning(f"Invalid entry price {entry_price} for {direction} — skipping")
         return None
+
+    # Validate current market conditions — signal may be stale
+    current_yes = _get_current_price(market_id)
+    if current_yes is not None:
+        # 1. Market already resolved
+        if current_yes >= 0.97 or current_yes <= 0.03:
+            logger.info(f"Trade blocked: market resolved (yes={current_yes:.3f}) — marking signal EXPIRED")
+            client.table("signals").update({"status": "EXPIRED"}).eq("id", signal["id"]).execute()
+            return None
+        # 2. Price drifted too far — original divergence hypothesis no longer valid
+        current_entry = current_yes if direction == "YES" else round(1 - current_yes, 4)
+        drift = abs(current_entry - entry_price) / entry_price
+        if drift > MAX_SIGNAL_DRIFT_PCT:
+            logger.info(f"Trade blocked: price drifted {drift:.0%} from signal (signal={entry_price:.3f} now={current_entry:.3f}) — marking signal EXPIRED")
+            client.table("signals").update({"status": "EXPIRED"}).eq("id", signal["id"]).execute()
+            return None
 
     # Kelly sizing: edge = confidence, odds = payout ratio
     capital = float(state["current_capital"])
