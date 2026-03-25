@@ -1,6 +1,6 @@
 # Polymarket Contrarian Bot — Project Context
 
-> Actualizado: 2026-03-25 00:00 UTC
+> Actualizado: 2026-03-25 22:40 UTC
 > Actualizado cada 12h por run_collector.py. Editar manualmente para notas permanentes.
 
 ---
@@ -11,7 +11,7 @@
 |------|--------|-------------|
 | Fase 1: Data Collection | **COMPLETA** | Collector corriendo 24/7 en VPS |
 | Fase 2: Signal Engine | **COMPLETA** | Engine con whale data v2 (PMS Agent API activo) |
-| Fase 3: Paper Trading | **EN CURSO** | Reset limpio 2026-03-22. 2 trades abiertos |
+| Fase 3: Paper Trading | **EN CURSO** | Run 2 limpia desde 2026-03-25. 4 trades abiertos |
 | Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@187.124.45.248 |
 | Fase 4: Dashboard | Pendiente | Next.js en Vercel |
 | Fase 5: Optimizacion | Pendiente | Ajustar thresholds con datos reales |
@@ -23,7 +23,8 @@
 **VPS:** kaizen@187.124.45.248 (Ubuntu 24, 2 CPUs, 8GB RAM)
 **Repo:** https://github.com/flippy-03/polymarket-contrarian (privado)
 **Deploy key:** generada en VPS, añadida a GitHub (read-only)
-**SSH desde PC local:** clave en `~/.ssh/id_ed25519` (flippyopenclaw@gmail.com)
+**SSH desde PC local:** clave en `~/.ssh/id_ed25519` (flippyopenclaw@gmail.com) — sin passphrase para acceso desde Claude Code
+**SSH root:** tambien autorizado (clave añadida a /root/.ssh/authorized_keys el 2026-03-25)
 
 ### Servicios systemd (arrancan solos al reiniciar)
 
@@ -33,6 +34,8 @@
 | polymarket-signal-engine | scripts/run_signal_engine.py | logs/signal_engine.log |
 | polymarket-paper-trader | scripts/run_paper_trader.py | logs/paper_trader.log |
 | polymarket-status-api | scripts/status_api.py | logs/status_api.log |
+
+Los servicios corren como usuario `kaizen`, proyecto en `/home/kaizen/polymarket-contrarian/`.
 
 ### Status API (para Openclaw)
 
@@ -52,42 +55,45 @@ Openclaw (Docker en mismo VPS) accede via `http://host.docker.internal:8765/stat
 ```bash
 # Desde PC local: editar -> commit -> push -> pull en VPS
 git push origin main
-ssh kaizen@187.124.45.248 "cd ~/polymarket-contrarian && git pull"
+ssh root@187.124.45.248 "cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main"
 # Restart servicios (requiere sudo desde Openclaw):
-# sudo systemctl restart polymarket-collector polymarket-signal-engine polymarket-paper-trader
+# sudo systemctl restart polymarket-paper-trader polymarket-signal-engine polymarket-collector
 ```
 
-### Comandos de operacion (desde PC local sin sudo)
+### Comandos de operacion (desde Claude Code / PC local)
 
 ```bash
 # Ver logs en tiempo real
-ssh kaizen@187.124.45.248 "tail -f ~/polymarket-contrarian/logs/collector.log"
+ssh -i ~/.ssh/id_ed25519 root@187.124.45.248 "tail -50 /home/kaizen/polymarket-contrarian/logs/paper_trader.log"
 # Ver estado de servicios
-ssh kaizen@187.124.45.248 "systemctl status polymarket-collector polymarket-signal-engine polymarket-paper-trader --no-pager"
+ssh -i ~/.ssh/id_ed25519 root@187.124.45.248 "systemctl is-active polymarket-collector polymarket-signal-engine polymarket-paper-trader polymarket-status-api"
 # Ver status via API
-ssh kaizen@187.124.45.248 "curl -s http://localhost:8765/status"
+ssh -i ~/.ssh/id_ed25519 root@187.124.45.248 "curl -s http://localhost:8765/status"
 ```
 
 ---
 
-## Stats actuales (2026-03-25 00:00 UTC)
+## Stats actuales (2026-03-25 22:40 UTC) — Run 2
 
 | Metrica | Valor |
 |---------|-------|
-| Snapshots en DB | 404,547+ (acumulando en VPS) |
-| Mercados totales | ~4,400 |
-| Wallets watched | 29 |
-| Senales generadas | 22 totales (0 activas) |
-| Trades abiertos | 2 ($97.50 en posiciones) |
-| Trades cerrados | 0 (post-reset limpio) |
-| P&L realizado | $0.00 |
-| Capital actual | $902.50 (inicio: $1,000) |
-| Win rate | 0% (sin trades cerrados aun) |
+| Snapshots en DB | 400k+ (acumulando en VPS) |
+| Mercados activos | ~4,500 |
+| Run activa | Run 2 (inicio 2026-03-25T22:34 UTC) |
+| Capital | $1,000.00 (inicio run 2) |
+| Trades abiertos | 4 |
+| Trades cerrados | 1 (RESOLUTION, -$40.73) |
+| P&L realizado | -$40.73 |
+| Unrealized P&L | +$2.95 |
 | Circuit breaker | OK |
 
-**Trades abiertos (post-reset, limpios):**
-- YES @ $0.060 — abierto 2026-03-23T08:58
-- NO @ $0.589 — abierto 2026-03-23T19:25
+**Trades abiertos (run 2):**
+- NO @ 0.760 — señal 2026-03-25T21:39
+- YES @ 0.550 — señal 2026-03-25T00:51
+- NO @ 0.550 — señal 2026-03-25T00:20
+- NO @ 0.260 — señal 2026-03-25T22:20
+
+**Nota run 1 (archivada):** 10 trades con bugs — trailing stop/TP nunca ejecutaron. Capital final $770. Datos conservados en DB con run_id=1 para histórico UI.
 
 ---
 
@@ -113,7 +119,7 @@ src/
   trading/
     risk_manager.py           # Kelly sizing, circuit breaker, drawdown
     paper_trader.py           # open_trade / close_trade con P&L
-    position_manager.py       # Trailing stop, take profit, timeout
+    position_manager.py       # Trailing stop, take profit, timeout, resolution
     portfolio_tracker.py      # Stats y resumen del portfolio
 
   utils/
@@ -171,6 +177,12 @@ Prioridad en `detect_whale_herding_v2()`:
 - Por que: en produccion el trader ejecuta segundos despues de la senal. En dev local el PC esta apagado a ratos — precio actual seria incorrecto y sesgaría el backtesting
 - `_get_current_price()` sigue usandose en `position_manager.py` para trailing stop/TP (correcto)
 
+### Validacion de condiciones antes de abrir trade (añadido 2026-03-25)
+- Antes de ejecutar, `open_trade()` consulta el precio actual del mercado y bloquea si:
+  1. **Mercado resuelto**: yes_price >= 0.97 o <= 0.03 → señal marcada EXPIRED
+  2. **Drift excesivo**: precio actual difiere >40% del precio de la señal → señal marcada EXPIRED
+- Motivacion: senales antiguas (bloqueadas por circuit breaker) podian ejecutarse sobre mercados ya resueltos o con hipotesis invalidada por el movimiento del precio
+
 ### Filtros de calidad de senales
 - Sports: ~818 mercados eliminados por keywords en pregunta (category de la API es poco fiable)
 - Precio minimo MIN_ENTRY_PRICE=0.05. Aplica en ambas direcciones:
@@ -178,6 +190,13 @@ Prioridad en `detect_whale_herding_v2()`:
   - YES signal: yes_price > 0.95 -> skip (mercado casi resuelto YES, sin edge)
   - NO signal: yes_price < 0.05 -> skip (mercado casi resuelto NO, sin edge)
   - NO signal: 1 - yes_price < 0.05 -> skip (entrada sub-penny)
+
+### Multi-run / historico
+- Tabla `runs` en Supabase: id, started_at, ended_at, note
+- `paper_trades` y `portfolio_state` tienen columna `run_id`
+- `get_portfolio_state()` siempre coge el run_id mas alto (run activa)
+- Nuevas trades heredan run_id del portfolio_state activo
+- Run 1 archivada con nota "bug trailing stop/TP inactivo"
 
 ### Datos
 - `clobTokenIds` puede llegar como JSON string o lista Python — normalizer maneja ambos
@@ -197,7 +216,8 @@ Prioridad en `detect_whale_herding_v2()`:
 | Senales en mercados casi resueltos | Resuelto (2026-03-23) | Filtro yes_price > 0.95 / < 0.05 |
 | position_manager: RESOLUTION como TRAILING_STOP | Resuelto (2026-03-22) | _is_resolved() detecta ambas direcciones |
 | Paper trader usaba precio actual en vez de price_at_signal | Resuelto (2026-03-22) | open_trade() usa price_at_signal |
-| 10 trades contaminados (deportivos + sub-penny) | Resuelto (2026-03-22) | CANCELLED, portfolio reseteado a $1,000 |
+| **position_manager: trailing stop/TP/timeout nunca ejecutaban** | **Resuelto (2026-03-25)** | Bug elif chain: checks 2-4 encadenados al if raw_yes. Fix: if close_reason is None |
+| Senales antiguas abrian trades en mercados ya resueltos | Resuelto (2026-03-25) | Validacion pre-trade: resolved + drift >40% -> EXPIRED |
 | CLOB 404 masivos | Resuelto (silenciado) | Mercados AMM-only, en DEBUG |
 | Leaderboard solo 29 wallets | Limitacion API | PolymarketScan retorna 29 en lugar de 100 |
 | get_active_markets_from_db sin paginacion | Pendiente | Fix: anadir paginacion |
@@ -216,6 +236,10 @@ MAX_HOURS_TO_RESOLUTION     = 168
 SIGNAL_THRESHOLD            = 65
 INITIAL_CAPITAL             = 1000.0
 MIN_ENTRY_PRICE             = 0.05
+MAX_SIGNAL_DRIFT_PCT        = 0.40     # Drift maximo pre-trade (hipotesis invalidada)
+TRAILING_STOP_PCT           = 0.25
+TAKE_PROFIT_PCT             = 0.50
+MAX_DRAWDOWN_PCT            = 0.20
 # signal_engine internos:
 #   _MIN_VOLUME = 1_000
 #   _CANDIDATE_TOP_N = 500
@@ -240,8 +264,8 @@ MIN_ENTRY_PRICE             = 0.05
 **Fase 4 Dashboard (cuando se cumplan):**
 - [x] Al menos 1 senal generada
 - [x] Al menos 1 trade abierto
-- [x] 48h de datos limpios (desde 2026-03-22 — superado)
-- [ ] Al menos 1 trade limpio cerrado (post-reset)
+- [x] 48h de datos limpios
+- [ ] Al menos 1 trade limpio cerrado (post run 2 — en curso)
 
 **Pendientes tecnicos:**
 - `get_active_markets_from_db` sin paginacion (bajo riesgo, monitorizar si DB crece)
