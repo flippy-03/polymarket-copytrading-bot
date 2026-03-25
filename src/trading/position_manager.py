@@ -114,17 +114,19 @@ def check_open_positions() -> int:
                 close_reason = "RESOLUTION"
                 current_price = exit_price
 
-        # 2. Timeout
-        elif _is_expired(trade):
-            close_reason = "TIMEOUT"
+        # 2-4. Only check if not already resolved
+        if close_reason is None:
+            # 2. Timeout
+            if _is_expired(trade):
+                close_reason = "TIMEOUT"
 
-        # 3. Trailing stop
-        elif current_price <= entry_price * (1 - TRAILING_STOP_PCT):
-            close_reason = "TRAILING_STOP"
+            # 3. Trailing stop
+            elif current_price <= entry_price * (1 - TRAILING_STOP_PCT):
+                close_reason = "TRAILING_STOP"
 
-        # 4. Take profit
-        elif current_price >= entry_price * (1 + TAKE_PROFIT_PCT):
-            close_reason = "TAKE_PROFIT"
+            # 4. Take profit
+            elif current_price >= entry_price * (1 + TAKE_PROFIT_PCT):
+                close_reason = "TAKE_PROFIT"
 
         if close_reason:
             result = close_trade(trade, current_price, close_reason)
