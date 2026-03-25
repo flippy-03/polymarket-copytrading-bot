@@ -17,7 +17,7 @@ from src.utils.logger import logger
 
 
 def get_portfolio_state(client) -> dict | None:
-    result = client.table("portfolio_state").select("*").limit(1).execute()
+    result = client.table("portfolio_state").select("*").order("run_id", desc=True).limit(1).execute()
     return result.data[0] if result.data else None
 
 

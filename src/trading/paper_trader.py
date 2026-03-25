@@ -90,6 +90,7 @@ def open_trade(signal: dict) -> dict | None:
         "position_usd": position_usd,
         "status": "OPEN",
         "opened_at": datetime.now(tz=timezone.utc).isoformat(),
+        "run_id": state["run_id"],
     }
 
     result = client.table("paper_trades").insert(trade_row).execute()
