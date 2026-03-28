@@ -3,7 +3,7 @@ Snapshot collector: every SNAPSHOT_INTERVAL_SECONDS, captures price/orderbook
 data for all active candidate markets and stores in market_snapshots.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.data.polymarket_client import PolymarketClient
 from src.db import supabase_client as db
@@ -88,13 +88,37 @@ def collect_snapshots(markets: list[dict], whale_summary: dict | None = None) ->
 
 
 def get_active_markets_from_db() -> list[dict]:
-    """Fetch active candidate markets from DB that have a yes_token_id."""
+    """Fetch active candidate markets from DB that have a yes_token_id.
+
+    Prioritizes markets closest to resolution (matching signal engine's 40% proximity
+    weight) within the 6-168h window. Paginated to cover all markets in DB.
+    Capped at 1200 to stay within collector throughput per 2-min cycle.
+    """
     client = db.get_client()
-    result = (
-        client.table("markets")
-        .select("*")
-        .eq("is_active", True)
-        .not_.is_("yes_token_id", "null")
-        .execute()
-    )
-    return result.data
+    now = datetime.now(tz=timezone.utc)
+    min_end = (now + timedelta(hours=6)).isoformat()
+    max_end = (now + timedelta(hours=168)).isoformat()
+
+    all_markets: list[dict] = []
+    offset = 0
+    while True:
+        batch = (
+            client.table("markets")
+            .select("*")
+            .eq("is_active", True)
+            .not_.is_("yes_token_id", "null")
+            .is_("resolution", "null")
+            .gte("volume_24h", 1_000)
+            .gte("end_date", min_end)
+            .lte("end_date", max_end)
+            .order("end_date", desc=False)
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        )
+        all_markets.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+
+    return all_markets[:1200]
