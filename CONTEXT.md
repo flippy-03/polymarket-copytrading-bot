@@ -1,6 +1,6 @@
 # Polymarket Contrarian Bot — Project Context
 
-> Actualizado: 2026-03-26 08:35 UTC
+> Actualizado: 2026-03-28 12:40 UTC
 > Actualizado cada 12h por run_collector.py. Editar manualmente para notas permanentes.
 
 ---
@@ -11,7 +11,7 @@
 |------|--------|-------------|
 | Fase 1: Data Collection | **COMPLETA** | Collector corriendo 24/7 en VPS |
 | Fase 2: Signal Engine | **COMPLETA** | Engine con whale data v2 (PMS Agent API activo) |
-| Fase 3: Paper Trading | **EN CURSO** | Run 2 limpia desde 2026-03-25. 5 posiciones abiertas, todas en verde |
+| Fase 3: Paper Trading | **EN CURSO** | Run 2: 16 trades (7W/4L), P&L +$79.15. 5 pos abiertas. 2 fixes aplicados 2026-03-28 |
 | Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@187.124.45.248 |
 | Fase 4: Dashboard | Pendiente | Next.js en Vercel |
 | Fase 5: Optimizacion | Pendiente | Ajustar thresholds con datos reales |
@@ -77,31 +77,33 @@ sudo -u kaizen bash -c "cd /home/kaizen/polymarket-contrarian && PYTHONPATH=/hom
 
 ---
 
-## Stats actuales (2026-03-26 08:35 UTC) — Run 2
+## Stats actuales (2026-03-28 12:40 UTC) — Run 2
 
 | Metrica | Valor |
 |---------|-------|
-| Snapshots en DB | 650k+ (acumulando, ~650 cada 2 min) |
-| Mercados activos | ~4,826 candidatos (top 500 evaluados por ciclo) |
+| Snapshots en DB | 800k+ (acumulando) |
+| Mercados con cobertura de snapshots | ~1,088 (fix 2026-03-28: paginacion + alineacion con signal engine) |
+| Mercados candidatos en DB | ~7,638 activos |
 | Run activa | Run 2 (inicio 2026-03-25T22:34 UTC) |
 | Capital inicial | $1,000.00 |
-| Capital disponible | $760.84 (en 5 posiciones abiertas) |
-| Trades totales | 7 (1W 1L + 5 abiertas) |
-| Trades abiertos | 5 |
-| P&L realizado | -$14.35 |
-| Unrealized P&L | +$33.17 (todas en verde) |
+| Capital actual | $835.13 |
+| Trades totales | 16 (7W 4L + 5 abiertas) |
+| Trades abiertos | 5 / 5 slots |
+| P&L realizado | +$65.48 |
+| Unrealized P&L | +$13.67 |
+| P&L Total | +$79.15 |
 | Max drawdown | 22.6% |
-| Circuit breaker | OK |
+| Circuit breaker | is_circuit_broken=True en DB (bug cosmético — tiempo expirado, no bloquea) |
 
-**Trades abiertos (run 2) — 2026-03-26 08:35 UTC:**
+**Trades abiertos (run 2) — 2026-03-28 12:40 UTC:**
 
 | DIR | Entrada | Precio actual | P&L $ | P&L % | Abierta |
 |-----|---------|--------------|-------|-------|---------|
-| NO | 0.760 | 0.950 | +$12.50 | +25.0% | 25-Mar 21:39 |
-| YES | 0.550 | 0.550 | +$0.00 | +0.0% | 25-Mar 00:51 |
-| NO | 0.550 | 0.699 | +$12.22 | +27.1% | 25-Mar 00:20 |
-| NO | 0.460 | 0.510 | +$4.58 | +10.9% | 26-Mar 06:59 |
-| NO | 0.310 | 0.340 | +$3.87 | +9.7% | 26-Mar 06:59 |
+| NO | 0.550 | 0.596 | +$3.77 | +8.4% | 25-Mar 00:20 |
+| YES | 0.550 | 0.550 | $0.00 | 0.0% | 25-Mar 00:51 |
+| NO | 0.650 | 0.650 | $0.00 | 0.0% | 26-Mar 10:36 |
+| NO | 0.730 | 0.730 | $0.00 | 0.0% | 26-Mar 12:30 |
+| NO | 0.710 | 0.870 | +$9.90 | +22.5% | 27-Mar 21:14 |
 
 **Nota run 1 (archivada):** 10 trades con bugs — trailing stop/TP nunca ejecutaron. Capital final $770. Datos conservados en DB con run_id=1 para histórico UI.
 
@@ -230,7 +232,10 @@ Prioridad en `detect_whale_herding_v2()`:
 | Senales antiguas abrian trades en mercados ya resueltos | Resuelto (2026-03-25) | Validacion pre-trade: resolved + drift >40% -> EXPIRED |
 | CLOB 404 masivos | Resuelto (silenciado) | Mercados AMM-only, en DEBUG |
 | Leaderboard solo 29 wallets | Limitacion API | PolymarketScan retorna 29 en lugar de 100 |
-| get_active_markets_from_db sin paginacion | Pendiente | Fix: anadir paginacion |
+| get_active_markets_from_db sin paginacion | **Resuelto (2026-03-28)** | Paginado + filtrado 6-168h + order end_date ASC. Cobertura: 1088 mercados alineados con signal engine |
+| Signal engine 0 señales (no_data=490/500) | **Resuelto (2026-03-28)** | Causa: collector solo veía 1000 mercados por orden de inserción. Fix: snapshot_collector paginado y alineado |
+| YES entries en mercados 80%+ resueltos en NO | **Resuelto (2026-03-28)** | MIN_CONTRARIAN_PRICE=0.20 en config + filtro en signal_engine. -$87 en pérdidas evitadas en run 2 |
+| Circuit breaker is_circuit_broken no se resetea | Pendiente | CB expirado pero flag queda True en DB. Cosmético: no bloquea trading pero log muestra "BROKEN [X]" |
 
 ---
 
@@ -247,6 +252,7 @@ SIGNAL_THRESHOLD            = 65
 INITIAL_CAPITAL             = 1000.0
 MIN_ENTRY_PRICE             = 0.05
 MAX_SIGNAL_DRIFT_PCT        = 0.40     # Drift maximo pre-trade (hipotesis invalidada)
+MIN_CONTRARIAN_PRICE        = 0.20     # Entry minimo: no fadear mercados 80%+ resueltos en dir opuesta
 TRAILING_STOP_PCT           = 0.25
 TAKE_PROFIT_PCT             = 0.50
 MAX_DRAWDOWN_PCT            = 0.20
@@ -278,5 +284,5 @@ MAX_DRAWDOWN_PCT            = 0.20
 - [ ] Al menos 1 trade limpio cerrado (post run 2 — en curso)
 
 **Pendientes tecnicos:**
-- `get_active_markets_from_db` sin paginacion (bajo riesgo, monitorizar si DB crece)
+- Circuit breaker: `is_circuit_broken` no se resetea a False en DB cuando expira el tiempo (cosmético, no bloquea trading). Fix: en `is_trading_allowed()`, actualizar DB cuando `now >= until_dt`
 - Falcon API: re-activar cuando corrijan el endpoint /parameterized server-side
