@@ -26,7 +26,7 @@ from src.signals.contrarian_logic import (
     should_generate_signal,
 )
 from src.utils.logger import logger
-from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, MIN_ENTRY_PRICE
+from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, MIN_ENTRY_PRICE, MIN_CONTRARIAN_PRICE
 
 _CANDIDATE_TOP_N = 500
 _MIN_VOLUME = 1_000
@@ -384,6 +384,13 @@ def run_signal_engine() -> int:
                 entry = price if direction == "YES" else round(1 - price, 4)
                 if entry < MIN_ENTRY_PRICE:
                     logger.debug(f"Skip {question[:40]}: entry price {entry:.3f} < MIN_ENTRY_PRICE")
+                    skipped_score += 1
+                    continue
+                # Contrarian price floor: don't fade a market already 80%+ resolved
+                # in the opposite direction — whales are doing rational price discovery,
+                # not manipulation. Applies symmetrically to both directions.
+                if entry < MIN_CONTRARIAN_PRICE:
+                    logger.debug(f"Skip {question[:40]}: entry {entry:.3f} < MIN_CONTRARIAN_PRICE ({MIN_CONTRARIAN_PRICE}) — market near resolution")
                     skipped_score += 1
                     continue
             now = datetime.now(timezone.utc).isoformat()

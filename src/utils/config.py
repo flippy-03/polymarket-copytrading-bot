@@ -46,6 +46,13 @@ SPORTS_QUESTION_KEYWORDS = [
 # Un precio de 0.009 significa spread relativo del 10%+, destruye el edge.
 MIN_ENTRY_PRICE = 0.05
 
+# Precio minimo para señales contrarian: evita entrar en mercados ya 80%+ resueltos
+# en la direccion opuesta. A yes_price < 0.20, las ballenas no manipulan — hacen
+# price discovery racional sobre un resultado casi cierto. Aplica simetricamente:
+#   YES signal: yes_price >= MIN_CONTRARIAN_PRICE
+#   NO signal:  (1 - yes_price) >= MIN_CONTRARIAN_PRICE  →  yes_price <= 0.80
+MIN_CONTRARIAN_PRICE = 0.20
+
 # === PAPER TRADING ===
 INITIAL_CAPITAL = 1000.0
 MAX_POSITION_SIZE_PCT = 0.05
