@@ -1,7 +1,7 @@
 # Polymarket Contrarian Bot — Project Context
 
-> Actualizado: 2026-03-28 12:40 UTC
-> Actualizado cada 12h por run_collector.py. Editar manualmente para notas permanentes.
+> Actualizado: 2026-03-28 23:45 UTC
+> Actualizado manualmente tras cada sesion de trabajo. Editar manualmente para notas permanentes.
 
 ---
 
@@ -11,10 +11,38 @@
 |------|--------|-------------|
 | Fase 1: Data Collection | **COMPLETA** | Collector corriendo 24/7 en VPS |
 | Fase 2: Signal Engine | **COMPLETA** | Engine con whale data v2 (PMS Agent API activo) |
-| Fase 3: Paper Trading | **EN CURSO** | Run 2: 16 trades (7W/4L), P&L +$79.15. 5 pos abiertas. 2 fixes aplicados 2026-03-28 |
-| Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@187.124.45.248 |
-| Fase 4: Dashboard | Pendiente | Next.js en Vercel |
-| Fase 5: Optimizacion | Pendiente | Ajustar thresholds con datos reales |
+| Fase 3: Paper Trading | **EN CURSO** | Run 2: 20 trades (11W 4L + 1 abierta). P&L +$164.35. Capital $1,119.23 |
+| Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@168.231.86.93 |
+| Fase 4: Dashboard | **COMPLETA (local)** | Next.js funcional en PC local. Pendiente deploy a Vercel |
+| Fase 5: Optimizacion | Pendiente | Test suite + ajuste de thresholds con datos reales |
+
+---
+
+## ESTADO DE VERSIONES — CRITICO
+
+| Ubicacion | Version | Notas |
+|-----------|---------|-------|
+| **PC local** | ULTIMA — con todos los fixes de hoy | Sin commitear todavia |
+| **GitHub** | Commit 0e69588 (2026-03-28 manana) | Sin los fixes de hoy |
+| **VPS produccion** | Commit 0e69588 | signal_engine con bugs sigue activo |
+| **Supabase DB** | Actualizada | resolve_stuck_positions ya ejecutado |
+
+**ACCION PENDIENTE:** commit + push + deploy al VPS antes de que el signal_engine genere mas senales malas.
+
+Comandos deploy (ejecutar desde PC local, luego en Openclaw):
+```bash
+# PC local:
+cd /Users/flipp/Documents/polymarket-contrarian
+git add src/signals/signal_engine.py scripts/resolve_stuck_positions.py
+git commit -m "Fix signal_engine: block missing price, symmetric entry ceiling [0.20-0.80]"
+git push origin main
+
+# En Openclaw (VPS):
+cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main
+sudo systemctl restart polymarket-signal-engine polymarket-paper-trader
+```
+
+Nota: el dashboard NO se commitea (es carpeta nueva con .env.local — deploy va directo a Vercel).
 
 ---
 
@@ -22,9 +50,10 @@
 
 **VPS:** kaizen@168.231.86.93 (Ubuntu 24, 2 CPUs, 8GB RAM) — hostname: kaiflow
 **Repo:** https://github.com/flippy-03/polymarket-contrarian (privado)
-**Deploy key:** generada en VPS, añadida a GitHub (read-only)
+**Deploy key:** generada en VPS, anadida a GitHub (read-only)
 **SSH desde PC local:** clave en `~/.ssh/id_ed25519` (flippyopenclaw@gmail.com) — sin passphrase
-**SSH root:** autorizado en /root/.ssh/authorized_keys. NOTA: SSH desde Claude Code no funciona actualmente (bug OpenSSH 10.2 en Git Bash/Windows — `no identity pubkey loaded`). Usar Openclaw para ejecutar comandos en VPS.
+**SSH root:** autorizado en /root/.ssh/authorized_keys.
+**NOTA SSH:** SSH desde Claude Code no funciona actualmente (bug OpenSSH 10.2 en Git Bash/Windows). Usar Openclaw para ejecutar comandos en VPS.
 
 ### Servicios systemd (arrancan solos al reiniciar)
 
@@ -37,75 +66,61 @@
 
 Los servicios corren como usuario `kaizen`, proyecto en `/home/kaizen/polymarket-contrarian/`.
 
+### Workflow de deploy
+
+```bash
+# PC local: editar -> commit -> push
+git push origin main
+
+# En Openclaw (VPS):
+cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main
+sudo systemctl restart polymarket-paper-trader polymarket-signal-engine polymarket-collector
+```
+
 ### Status API (para Openclaw)
 
 Puerto 8765, sin auth (solo acceso interno VPS).
 Openclaw (Docker en mismo VPS) accede via `http://host.docker.internal:8765/status`
 
-| Endpoint | Contenido |
-|----------|-----------|
-| GET /status | Estado servicios + portfolio completo (JSON) |
-| GET /logs/collector | Ultimas 50 lineas collector.log |
-| GET /logs/signals | Ultimas 50 lineas signal_engine.log |
-| GET /logs/trader | Ultimas 50 lineas paper_trader.log |
-| GET /healthz | Ping simple |
-
-### Workflow de deploy
-
-```bash
-# Desde PC local: editar -> commit -> push -> pull en VPS (via Openclaw)
-git push origin main
-# En Openclaw:
-cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main
-sudo systemctl restart polymarket-paper-trader polymarket-signal-engine polymarket-collector
-```
-
-### Comandos de operacion (ejecutar en Openclaw — SSH desde Claude Code no funciona actualmente)
-
-```bash
-# Ver estado servicios
-systemctl status polymarket-paper-trader polymarket-signal-engine polymarket-collector polymarket-status-api --no-pager
-
-# Ver logs
-tail -50 /home/kaizen/polymarket-contrarian/logs/paper_trader.log
-tail -50 /home/kaizen/polymarket-contrarian/logs/signal_engine.log
-tail -50 /home/kaizen/polymarket-contrarian/logs/collector.log
-
-# Ver P&L posiciones abiertas (guardar en /tmp/pnl.py y ejecutar):
-sudo -u kaizen bash -c "cd /home/kaizen/polymarket-contrarian && PYTHONPATH=/home/kaizen/polymarket-contrarian .venv/bin/python /tmp/pnl.py"
-```
-
 ---
 
-## Stats actuales (2026-03-28 12:40 UTC) — Run 2
+## Stats actuales (2026-03-28 23:45 UTC) — Run 2
+
+Recalculadas tras cerrar 4 posiciones atascadas con resolve_stuck_positions.py
 
 | Metrica | Valor |
 |---------|-------|
-| Snapshots en DB | 800k+ (acumulando) |
-| Mercados con cobertura de snapshots | ~1,088 (fix 2026-03-28: paginacion + alineacion con signal engine) |
-| Mercados candidatos en DB | ~7,638 activos |
 | Run activa | Run 2 (inicio 2026-03-25T22:34 UTC) |
 | Capital inicial | $1,000.00 |
-| Capital actual | $835.13 |
-| Trades totales | 16 (7W 4L + 5 abiertas) |
-| Trades abiertos | 5 / 5 slots |
-| P&L realizado | +$65.48 |
-| Unrealized P&L | +$13.67 |
-| P&L Total | +$79.15 |
-| Max drawdown | 22.6% |
-| Circuit breaker | is_circuit_broken=True en DB (bug cosmético — tiempo expirado, no bloquea) |
+| Capital actual | $1,119.23 |
+| Trades totales | 20 (11W 4L + 1 abierta) |
+| P&L realizado | +$164.35 |
+| P&L % | +16.4% |
+| Win rate | 73.3% |
+| Max drawdown | 4.1% |
+| Loss streak actual | 0 |
+| Circuit breaker | off |
+| Posiciones abiertas | 1 / 5 slots |
 
-**Trades abiertos (run 2) — 2026-03-28 12:40 UTC:**
+**Posicion abierta (run 2) — 2026-03-28 23:45 UTC:**
 
-| DIR | Entrada | Precio actual | P&L $ | P&L % | Abierta |
-|-----|---------|--------------|-------|-------|---------|
-| NO | 0.550 | 0.596 | +$3.77 | +8.4% | 25-Mar 00:20 |
-| YES | 0.550 | 0.550 | $0.00 | 0.0% | 25-Mar 00:51 |
-| NO | 0.650 | 0.650 | $0.00 | 0.0% | 26-Mar 10:36 |
-| NO | 0.730 | 0.730 | $0.00 | 0.0% | 26-Mar 12:30 |
-| NO | 0.710 | 0.870 | +$9.90 | +22.5% | 27-Mar 21:14 |
+| Mercado | DIR | Entrada | yes_price actual | Estado |
+|---------|-----|---------|-----------------|--------|
+| Juan Pablo Velasco gubernatorial 2026 | NO | 0.550 | 0.369 | Activo, mercado sigue abierto |
 
-**Nota run 1 (archivada):** 10 trades con bugs — trailing stop/TP nunca ejecutaron. Capital final $770. Datos conservados en DB con run_id=1 para histórico UI.
+---
+
+## Historia de posiciones cerradas — Run 2
+
+| Mercado | DIR | Entrada | Salida | P&L | Razon |
+|---------|-----|---------|--------|-----|-------|
+| ETH > $2100 March 26 | NO | 0.650 | 1.000 | +$23.56 | RESOLUTION |
+| BTC > $70k March 26 | NO | 0.730 | 1.000 | +$18.50 | RESOLUTION |
+| Kanye BULLY by March 27 | NO | 0.710 | 1.000 | +$17.95 | RESOLUTION |
+| Avalanche Spread (-1.5) | YES | 0.550 | 1.000 | +$38.86 | RESOLUTION |
+| (otros 7 wins + 4 losses) | — | — | — | +$65.48 | varios |
+
+Nota: las 4 primeras filas estaban atascadas (sin snapshots por mercados expirados). Cerradas manualmente via resolve_stuck_positions.py el 2026-03-28 con precios verificados en Gamma API.
 
 ---
 
@@ -136,7 +151,7 @@ src/
 
   utils/
     config.py                 # Todos los parametros de estrategia
-    context_updater.py        # Actualiza CONTEXT.md cada 12h
+    context_updater.py        # Actualiza CONTEXT.md
     logger.py                 # Loguru logger
 
 scripts/
@@ -146,8 +161,44 @@ scripts/
   status_api.py               # HTTP API de monitoreo (puerto 8765, para Openclaw)
   run_cleanup.py              # Limpieza diaria
   setup_db.py                 # Verificar conexion y schema
+  resolve_stuck_positions.py  # Cierre manual de posiciones sin snapshots + recalculo portfolio
   test_whale_apis.py          # Test manual de APIs whale
+
+dashboard/                    # Fase 4 — Next.js (NO en git, deploy directo a Vercel)
+  src/app/
+    page.tsx                  # Dashboard principal (KPIs, equity curve, posiciones, senales, trades)
+    analytics/page.tsx        # Analytics (historico completo, charts, calendar, export CSV)
+    services/page.tsx         # Estado servicios systemd + circuit breaker + senales activas
+    api/portfolio/route.ts    # GET portfolio_state
+    api/trades/route.ts       # GET paper_trades con filtros
+    api/positions/route.ts    # GET posiciones abiertas con P&L no realizado
+    api/signals/route.ts      # GET senales por estado
+    api/stats/route.ts        # GET analytics completos
+  src/components/
+    Sidebar.tsx               # Nav fija con indicador Running/Paused en tiempo real
+    KpiCard.tsx               # Card de metrica con variantes de color
+    TimeFilter.tsx            # Filtro de periodo temporal
+  src/lib/
+    supabase.ts               # Cliente Supabase server-side (service role key)
+    hooks.ts                  # useAutoRefresh, formatPnl, formatPct, pnlColor, timeAgo
+    types.ts                  # TypeScript interfaces (PaperTrade, PortfolioState, Signal...)
 ```
+
+---
+
+## Dashboard (Fase 4) — Notas tecnicas
+
+- **Stack:** Next.js 16.2.1 + Tailwind v4 + Recharts 3.8.1 + Supabase JS
+- **Tema:** dark SaaS, CSS custom properties (--bg-primary, --green, --red, --blue...)
+- **Auto-refresh:** 30s en Dashboard, 60s en Analytics
+- **Puerto dev:** 3001 (3000 ocupado por otra app)
+- **DB schema critico:**
+  - `pnl_usd`, `pnl_pct` (decimal, NO porcentaje — multiplicar x100 para display)
+  - `shares`, `position_usd` (NO quantity/position_size)
+  - `pnl_pct` almacenado como decimal: -0.2857 = -28.57%
+- **Drawdown en dashboard:** usa `(initial_capital - current_capital) / initial_capital` (actual), NO `max_drawdown` de la DB (historico)
+- **Indicador Running/Paused:** en Sidebar, misma logica que risk_manager.is_trading_allowed()
+- **Deploy pendiente:** Vercel — requiere SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY como env vars
 
 ---
 
@@ -157,25 +208,18 @@ scripts/
 - **Polymarket Gamma API** — fuente principal de mercados
 - **Polymarket CLOB API** — precios en tiempo real (404 en AMM-only es normal, en DEBUG)
 - **PolymarketScan Public API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/public-api` (28 req/min)
-- **PolymarketScan Agent API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api` (60 req/min, sin auth). `?action=whales&limit=50&agent_id=contrarian-bot` reemplaza endpoint whale_trades del Public API que devolvía []
-- **Falcon API** — `https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized` POST. Bearer token en .env. Agent IDs: 575 (Market Insights), 556 (Whale Trades). ESTADO: devuelve 400 por error server-side. Graceful fallback implementado.
-
-### Integracion whale data (COMPLETA — 2026-03-24)
-
-Prioridad en `detect_whale_herding_v2()`:
-1. **Falcon Market Insights** (agent_id=575) — top1_wallet_pct > 30% = herding fuerte. Standby (API rota server-side).
-2. **PMS Agent API** (action=whales) — ACTIVO. 50 trades, ~21-32 mercados directionales por ciclo.
-3. **Snapshot-based** (detect_whale_herding) — lee whale_direction de DB. Fallback si mercado no aparece en PMS.
-4. **Momentum de precio** (>5% en 1h) — ultimo fallback cuando sample_size == 0.
+- **PolymarketScan Agent API** — `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api` (60 req/min, sin auth). `?action=whales&limit=50&agent_id=contrarian-bot`
+- **Falcon API** — `https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized` POST. Bearer token en .env. ESTADO: devuelve 400 server-side. Graceful fallback implementado.
 
 ### Estrategia
 - Divergencia proxy v1: whale herding + velocidad de precio > 5% en 1h
-- Fallback sin whale data: velocidad-only >= 5%/1h, divergence_score = vel_norm * 100
-- Seleccion de mercados: top 500 por score compuesto = vol*0.3 + proximidad*0.4 + velocidad*0.3 (min vol $1k)
+- Fallback sin whale data: velocidad-only >= 5%/1h
+- Seleccion: top 500 por score compuesto = vol*0.3 + proximidad*0.4 + velocidad*0.3
 - Pesos del score: divergencia 50%, momentum 30%, smart wallet 20%
 - Threshold de senal: 65/100
-- Categorias excluidas: sports (filtro por keywords en pregunta, no por campo category que llega vacio)
-- Ventana de mercados: 6h a 7d hasta resolucion
+- **Rango valido de entrada: [0.20, 0.80]** (simetrico, ambas direcciones)
+  - < 0.20: mercado cerca de resolverse en direccion opuesta (MIN_CONTRARIAN_PRICE)
+  - > 0.80: take-profit matematicamente inalcanzable en mercado binario (ceiling anadido 2026-03-28)
 
 ### Risk management
 - Half-Kelly sizing (Kelly x 0.5), max 5% capital por trade
@@ -184,105 +228,82 @@ Prioridad en `detect_whale_herding_v2()`:
 - Max drawdown: 20% -> pausa
 - Trailing stop: 25% | Take profit: 50%
 
-### Paper trader: precio de entrada (CRITICO)
+### Paper trader: precio de entrada
 - `open_trade()` usa `price_at_signal`, NO el precio actual del mercado
-- Por que: en produccion el trader ejecuta segundos despues de la senal. En dev local el PC esta apagado a ratos — precio actual seria incorrecto y sesgaría el backtesting
-- `_get_current_price()` sigue usandose en `position_manager.py` para trailing stop/TP (correcto)
-
-### Validacion de condiciones antes de abrir trade (añadido 2026-03-25)
-- Antes de ejecutar, `open_trade()` consulta el precio actual del mercado y bloquea si:
-  1. **Mercado resuelto**: yes_price >= 0.97 o <= 0.03 → señal marcada EXPIRED
-  2. **Drift excesivo**: precio actual difiere >40% del precio de la señal → señal marcada EXPIRED
-- Motivacion: senales antiguas (bloqueadas por circuit breaker) podian ejecutarse sobre mercados ya resueltos o con hipotesis invalidada por el movimiento del precio
-
-### Filtros de calidad de senales
-- Sports: ~818 mercados eliminados por keywords en pregunta (category de la API es poco fiable)
-- Precio minimo MIN_ENTRY_PRICE=0.05. Aplica en ambas direcciones:
-  - YES signal: yes_price < 0.05 -> skip (entrada sub-penny)
-  - YES signal: yes_price > 0.95 -> skip (mercado casi resuelto YES, sin edge)
-  - NO signal: yes_price < 0.05 -> skip (mercado casi resuelto NO, sin edge)
-  - NO signal: 1 - yes_price < 0.05 -> skip (entrada sub-penny)
-
-### Multi-run / historico
-- Tabla `runs` en Supabase: id, started_at, ended_at, note
-- `paper_trades` y `portfolio_state` tienen columna `run_id`
-- `get_portfolio_state()` siempre coge el run_id mas alto (run activa)
-- Nuevas trades heredan run_id del portfolio_state activo
-- Run 1 archivada con nota "bug trailing stop/TP inactivo"
-
-### Datos
-- `clobTokenIds` puede llegar como JSON string o lista Python — normalizer maneja ambos
-- Mercados con token IDs < 10 chars se consideran corruptos y se nullean
-- Snapshots sin precio (CLOB 404) se descartan
+- Validacion pre-trade: bloquea si mercado resuelto (yes_price >= 0.97 o <= 0.03) o drift > 40%
 
 ---
 
 ## Historial de bugs resueltos
 
-| Bug | Estado | Descripcion |
-|-----|--------|-------------|
-| whale_trades Public API devuelve [] | Resuelto (2026-03-24) | Migrado a Agent API. 50 trades/llamada |
-| Falcon parameterized endpoint devuelve 400 | Bloqueado (server-side) | Graceful fallback. PMS Agent API es fuente primaria |
-| Filtro sports no funcionaba | Resuelto (2026-03-22) | Gamma devuelve category vacio. Filtro por keywords |
-| Mercados sub-$0.05 generaban senales | Resuelto (2026-03-22) | MIN_ENTRY_PRICE=0.05 |
-| Senales en mercados casi resueltos | Resuelto (2026-03-23) | Filtro yes_price > 0.95 / < 0.05 |
-| position_manager: RESOLUTION como TRAILING_STOP | Resuelto (2026-03-22) | _is_resolved() detecta ambas direcciones |
-| Paper trader usaba precio actual en vez de price_at_signal | Resuelto (2026-03-22) | open_trade() usa price_at_signal |
-| **position_manager: trailing stop/TP/timeout nunca ejecutaban** | **Resuelto (2026-03-25)** | Bug elif chain: checks 2-4 encadenados al if raw_yes. Fix: if close_reason is None |
-| Senales antiguas abrian trades en mercados ya resueltos | Resuelto (2026-03-25) | Validacion pre-trade: resolved + drift >40% -> EXPIRED |
-| CLOB 404 masivos | Resuelto (silenciado) | Mercados AMM-only, en DEBUG |
-| Leaderboard solo 29 wallets | Limitacion API | PolymarketScan retorna 29 en lugar de 100 |
-| get_active_markets_from_db sin paginacion | **Resuelto (2026-03-28)** | Paginado + filtrado 6-168h + order end_date ASC. Cobertura: 1088 mercados alineados con signal engine |
-| Signal engine 0 señales (no_data=490/500) | **Resuelto (2026-03-28)** | Causa: collector solo veía 1000 mercados por orden de inserción. Fix: snapshot_collector paginado y alineado |
-| YES entries en mercados 80%+ resueltos en NO | **Resuelto (2026-03-28)** | MIN_CONTRARIAN_PRICE=0.20 en config + filtro en signal_engine. -$87 en pérdidas evitadas en run 2 |
-| Circuit breaker is_circuit_broken no se resetea | Pendiente | CB expirado pero flag queda True en DB. Cosmético: no bloquea trading pero log muestra "BROKEN [X]" |
+| Bug | Resuelto | Descripcion |
+|-----|----------|-------------|
+| whale_trades Public API devuelve [] | 2026-03-24 | Migrado a Agent API |
+| Falcon parameterized 400 | Bloqueado (server-side) | Graceful fallback implementado |
+| Filtro sports no funcionaba | 2026-03-22 | Filtro por keywords en pregunta |
+| Mercados sub-$0.05 generaban senales | 2026-03-22 | MIN_ENTRY_PRICE=0.05 |
+| position_manager: trailing stop/TP/timeout nunca ejecutaban | 2026-03-25 | Bug elif chain — fix: if close_reason is None |
+| Senales antiguas en mercados ya resueltos | 2026-03-25 | Validacion pre-trade |
+| Snapshot collector sin paginacion | 2026-03-28 | Paginado + alineacion con signal engine |
+| YES entries < 0.20 (mercados 80%+ resueltos) | 2026-03-28 | MIN_CONTRARIAN_PRICE=0.20 |
+| NO entries con entry > 0.80 (TP inalcanzable) | 2026-03-28 | Ceiling simetrico en signal_engine |
+| price=None saltaba todos los filtros en signal_engine | 2026-03-28 | Hard skip si sin precio |
+| 4 posiciones abiertas sin snapshots (mercados expirados) | 2026-03-28 | resolve_stuck_positions.py — cerradas con precios Gamma API |
+| portfolio_state desincronizado (drawdown 22.6%, capital $835) | 2026-03-28 | Reconstruido desde trade history: capital $1119, +16.4%, 73.3% WR |
+| Dashboard mostraba P&L $0 en Analytics | 2026-03-28 | Nombres de columna incorrectos (pnl vs pnl_usd, quantity vs shares) |
 
 ---
 
 ## Parametros clave (config.py)
 
 ```python
-DIVERGENCE_THRESHOLD_MIN    = 0.10
-DIVERGENCE_THRESHOLD_STRONG = 0.15
-MIN_VOLUME_24H              = 10_000   # market_scanner
-MIN_LIQUIDITY               = 5_000
+MIN_VOLUME_24H              = 10_000
 MIN_HOURS_TO_RESOLUTION     = 6
 MAX_HOURS_TO_RESOLUTION     = 168
 SIGNAL_THRESHOLD            = 65
 INITIAL_CAPITAL             = 1000.0
 MIN_ENTRY_PRICE             = 0.05
-MAX_SIGNAL_DRIFT_PCT        = 0.40     # Drift maximo pre-trade (hipotesis invalidada)
-MIN_CONTRARIAN_PRICE        = 0.20     # Entry minimo: no fadear mercados 80%+ resueltos en dir opuesta
+MAX_SIGNAL_DRIFT_PCT        = 0.40
+MIN_CONTRARIAN_PRICE        = 0.20     # floor — no fadear mercados 80%+ resueltos
+# ceiling implicito: entry <= 1 - MIN_CONTRARIAN_PRICE = 0.80 (en signal_engine)
 TRAILING_STOP_PCT           = 0.25
 TAKE_PROFIT_PCT             = 0.50
 MAX_DRAWDOWN_PCT            = 0.20
-# signal_engine internos:
-#   _MIN_VOLUME = 1_000
-#   _CANDIDATE_TOP_N = 500
-#   fallback velocity threshold = 0.05 (5%)
+KELLY_FRACTION              = 0.5
+MAX_POSITION_SIZE_PCT       = 0.05
+CIRCUIT_BREAKER_LOSSES      = 3
+CIRCUIT_BREAKER_COOLDOWN_HOURS = 24
 ```
 
 ---
 
 ## Credenciales y entorno
 
-- `.env` en raiz del proyecto (no commitear — esta en .gitignore)
-- Python 3.12 en VPS (3.11+ requerido), venv en `.venv/`
+- `.env` en raiz del proyecto (no commitear)
+- Python 3.12 en VPS, venv en `.venv/`
 - Supabase URL: `https://pdmmvhshorwfqseattvz.supabase.co`
-- PolymarketScan Public API: `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/public-api`
-- PolymarketScan Agent API: `https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api`
-- Falcon/narrative API: `https://narrative.agent.heisenberg.so` — Bearer token en .env
 
 ---
 
-## Proximo paso inmediato
+## Proximo paso: Test Suite (Fase 5 prep)
 
-**Fase 4 Dashboard (cuando se cumplan):**
-- [x] Al menos 1 senal generada
-- [x] Al menos 1 trade abierto
-- [x] 48h de datos limpios
-- [ ] Al menos 1 trade limpio cerrado (post run 2 — en curso)
+Plan acordado (2026-03-28):
 
-**Pendientes tecnicos:**
-- Circuit breaker: `is_circuit_broken` no se resetea a False en DB cuando expira el tiempo (cosmético, no bloquea trading). Fix: en `is_trading_allowed()`, actualizar DB cuando `now >= until_dt`
-- Falcon API: re-activar cuando corrijan el endpoint /parameterized server-side
+**Capa 1 — pytest puro** (sin DB, determinista, repeatable):
+Casos a cubrir:
+- Filtros de precio signal_engine: 8 casos limite (None, <0.05, >0.95, <0.20, >0.80, valido)
+- Kelly sizing: edge=0, edge negativo, posicion < $1, cap al 5%
+- Circuit breaker: 0/2/3 perdidas, CB activo, CB expirado
+- is_trading_allowed: CB activo, DD >= 20%, max_positions, ok
+- Resolucion mercado: yes_price 0.97, 0.03, 0.50, None
+- Trailing stop / TP: exactamente en umbral, encima, debajo
+- Timeout: 6d, 7d exacto, 8d
+- P&L: YES ganador, YES perdedor, NO ganador, NO perdedor
+
+**Capa 2 — script backtest/replay** (lee snapshots reales, sin modificar DB):
+- Lee market_snapshots historicos
+- Pasa por logica de position_manager con codigo actual
+- Produce informe JSON con resultados simulados
+- Valida position_manager end-to-end con datos reales
+
+**Run 0 en DB (opcional):** para validar flujo de escritura completo una vez.

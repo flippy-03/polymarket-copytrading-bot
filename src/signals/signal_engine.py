@@ -368,31 +368,46 @@ def run_signal_engine() -> int:
             direction = contrarian_direction
             price = velocity.get("current_price")
 
+            # FIX: price is required — skip if unavailable (no price = no filters = bad signal)
+            if price is None:
+                logger.debug(f"Skip {question[:40]}: no current price available")
+                skipped_no_data += 1
+                continue
+
             # Skip markets near resolution — bad risk/reward in both directions:
             #   YES signal: yes_price > 0.95 → market almost certainly resolves YES, no edge
             #   NO signal:  yes_price < 0.05 → market almost certainly resolves NO, no edge
-            # Also skip sub-penny entry prices (spread destroys edge)
-            if price is not None:
-                if direction == "YES" and price > (1 - MIN_ENTRY_PRICE):
-                    logger.debug(f"Skip {question[:40]}: YES near resolution (yes={price:.3f})")
-                    skipped_score += 1
-                    continue
-                if direction == "NO" and price < MIN_ENTRY_PRICE:
-                    logger.debug(f"Skip {question[:40]}: NO near resolution (yes={price:.3f})")
-                    skipped_score += 1
-                    continue
-                entry = price if direction == "YES" else round(1 - price, 4)
-                if entry < MIN_ENTRY_PRICE:
-                    logger.debug(f"Skip {question[:40]}: entry price {entry:.3f} < MIN_ENTRY_PRICE")
-                    skipped_score += 1
-                    continue
-                # Contrarian price floor: don't fade a market already 80%+ resolved
-                # in the opposite direction — whales are doing rational price discovery,
-                # not manipulation. Applies symmetrically to both directions.
-                if entry < MIN_CONTRARIAN_PRICE:
-                    logger.debug(f"Skip {question[:40]}: entry {entry:.3f} < MIN_CONTRARIAN_PRICE ({MIN_CONTRARIAN_PRICE}) — market near resolution")
-                    skipped_score += 1
-                    continue
+            if direction == "YES" and price > (1 - MIN_ENTRY_PRICE):
+                logger.debug(f"Skip {question[:40]}: YES near resolution (yes={price:.3f})")
+                skipped_score += 1
+                continue
+            if direction == "NO" and price < MIN_ENTRY_PRICE:
+                logger.debug(f"Skip {question[:40]}: NO near resolution (yes={price:.3f})")
+                skipped_score += 1
+                continue
+
+            entry = price if direction == "YES" else round(1 - price, 4)
+
+            if entry < MIN_ENTRY_PRICE:
+                logger.debug(f"Skip {question[:40]}: entry price {entry:.3f} < MIN_ENTRY_PRICE")
+                skipped_score += 1
+                continue
+
+            # Contrarian price floor: don't fade a market already 80%+ resolved in the
+            # opposite direction — rational price discovery, not manipulation.
+            # Symmetric: YES entry >= 0.20, NO entry >= 0.20 (i.e. yes_price <= 0.80).
+            if entry < MIN_CONTRARIAN_PRICE:
+                logger.debug(f"Skip {question[:40]}: entry {entry:.3f} < MIN_CONTRARIAN_PRICE — market near resolution")
+                skipped_score += 1
+                continue
+
+            # Contrarian price ceiling: if NO entry > 0.80, take-profit (entry × 1.50)
+            # would exceed 1.0 — mathematically unreachable in a binary market.
+            # Symmetric cap: entry must be in [MIN_CONTRARIAN_PRICE, 1 - MIN_CONTRARIAN_PRICE].
+            if entry > (1 - MIN_CONTRARIAN_PRICE):
+                logger.debug(f"Skip {question[:40]}: entry {entry:.3f} > {1 - MIN_CONTRARIAN_PRICE:.2f} — TP unreachable in binary market")
+                skipped_score += 1
+                continue
             now = datetime.now(timezone.utc).isoformat()
             expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
