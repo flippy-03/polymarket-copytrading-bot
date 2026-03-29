@@ -1,6 +1,6 @@
 # Polymarket Contrarian Bot — Project Context
 
-> Actualizado: 2026-03-28 23:45 UTC
+> Actualizado: 2026-03-29 19:30 UTC
 > Actualizado manualmente tras cada sesion de trabajo. Editar manualmente para notas permanentes.
 
 ---
@@ -11,38 +11,21 @@
 |------|--------|-------------|
 | Fase 1: Data Collection | **COMPLETA** | Collector corriendo 24/7 en VPS |
 | Fase 2: Signal Engine | **COMPLETA** | Engine con whale data v2 (PMS Agent API activo) |
-| Fase 3: Paper Trading | **EN CURSO** | Run 2: 20 trades (11W 4L + 1 abierta). P&L +$164.35. Capital $1,119.23 |
+| Fase 3: Paper Trading | **EN CURSO** | Run 2: 16 closed (12W 4L) + 1 abierta. P&L +$167.91. Capital $1,122.79 |
 | Fase 3.5: VPS Deploy | **COMPLETA** | 4 servicios systemd en kaizen@168.231.86.93 |
-| Fase 4: Dashboard | **COMPLETA (local)** | Next.js funcional en PC local. Pendiente deploy a Vercel |
-| Fase 5: Optimizacion | Pendiente | Test suite + ajuste de thresholds con datos reales |
+| Fase 4: Dashboard | **COMPLETA (local)** | Next.js funcional en PC local (puerto 3000). Pendiente deploy a Vercel |
+| Fase 5: Optimizacion | **EN CURSO** | Capa 1 pytest COMPLETA (75 tests). Capa 2 backtest pendiente |
 
 ---
 
-## ESTADO DE VERSIONES — CRITICO
+## ESTADO DE VERSIONES
 
 | Ubicacion | Version | Notas |
 |-----------|---------|-------|
-| **PC local** | ULTIMA — con todos los fixes de hoy | Sin commitear todavia |
-| **GitHub** | Commit 0e69588 (2026-03-28 manana) | Sin los fixes de hoy |
-| **VPS produccion** | Commit 0e69588 | signal_engine con bugs sigue activo |
-| **Supabase DB** | Actualizada | resolve_stuck_positions ya ejecutado |
-
-**ACCION PENDIENTE:** commit + push + deploy al VPS antes de que el signal_engine genere mas senales malas.
-
-Comandos deploy (ejecutar desde PC local, luego en Openclaw):
-```bash
-# PC local:
-cd /Users/flipp/Documents/polymarket-contrarian
-git add src/signals/signal_engine.py scripts/resolve_stuck_positions.py
-git commit -m "Fix signal_engine: block missing price, symmetric entry ceiling [0.20-0.80]"
-git push origin main
-
-# En Openclaw (VPS):
-cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main
-sudo systemctl restart polymarket-signal-engine polymarket-paper-trader
-```
-
-Nota: el dashboard NO se commitea (es carpeta nueva con .env.local — deploy va directo a Vercel).
+| **PC local** | e73d76b | Con todos los fixes de las sesiones 2026-03-28/29 |
+| **GitHub** | e73d76b | Al dia |
+| **VPS produccion** | e73d76b | Al dia — pull hecho 2026-03-29 |
+| **Supabase DB** | Actualizada | cleanup_bad_signals.py ejecutado, portfolio reconstruido |
 
 ---
 
@@ -54,6 +37,7 @@ Nota: el dashboard NO se commitea (es carpeta nueva con .env.local — deploy va
 **SSH desde PC local:** clave en `~/.ssh/id_ed25519` (flippyopenclaw@gmail.com) — sin passphrase
 **SSH root:** autorizado en /root/.ssh/authorized_keys.
 **NOTA SSH:** SSH desde Claude Code no funciona actualmente (bug OpenSSH 10.2 en Git Bash/Windows). Usar Openclaw para ejecutar comandos en VPS.
+**NOTA git en VPS:** Siempre usar `sudo -u kaizen git -C /home/kaizen/polymarket-contrarian ...` (no como root — falla por dubious ownership).
 
 ### Servicios systemd (arrancan solos al reiniciar)
 
@@ -73,7 +57,7 @@ Los servicios corren como usuario `kaizen`, proyecto en `/home/kaizen/polymarket
 git push origin main
 
 # En Openclaw (VPS):
-cd /home/kaizen/polymarket-contrarian && sudo -u kaizen git pull origin main
+sudo -u kaizen git -C /home/kaizen/polymarket-contrarian pull origin main
 sudo systemctl restart polymarket-paper-trader polymarket-signal-engine polymarket-collector
 ```
 
@@ -84,43 +68,29 @@ Openclaw (Docker en mismo VPS) accede via `http://host.docker.internal:8765/stat
 
 ---
 
-## Stats actuales (2026-03-28 23:45 UTC) — Run 2
+## Stats actuales (2026-03-29 19:30 UTC) — Run 2
 
-Recalculadas tras cerrar 4 posiciones atascadas con resolve_stuck_positions.py
+Recalculadas tras cleanup_bad_signals.py (2026-03-29)
 
 | Metrica | Valor |
 |---------|-------|
 | Run activa | Run 2 (inicio 2026-03-25T22:34 UTC) |
 | Capital inicial | $1,000.00 |
-| Capital actual | $1,119.23 |
-| Trades totales | 20 (11W 4L + 1 abierta) |
-| P&L realizado | +$164.35 |
-| P&L % | +16.4% |
-| Win rate | 73.3% |
-| Max drawdown | 4.1% |
-| Loss streak actual | 0 |
+| Capital actual | $1,122.79 |
+| Trades cerrados | 16 (12W 4L) |
+| P&L realizado | +$167.91 |
+| P&L % | +16.8% |
+| Win rate | 75% |
+| Max drawdown | 6.3% |
+| Loss streak actual | 0 (pico historico: 3) |
 | Circuit breaker | off |
 | Posiciones abiertas | 1 / 5 slots |
 
-**Posicion abierta (run 2) — 2026-03-28 23:45 UTC:**
+**Posicion abierta (run 2) — 2026-03-29:**
 
-| Mercado | DIR | Entrada | yes_price actual | Estado |
-|---------|-----|---------|-----------------|--------|
-| Juan Pablo Velasco gubernatorial 2026 | NO | 0.550 | 0.369 | Activo, mercado sigue abierto |
-
----
-
-## Historia de posiciones cerradas — Run 2
-
-| Mercado | DIR | Entrada | Salida | P&L | Razon |
-|---------|-----|---------|--------|-----|-------|
-| ETH > $2100 March 26 | NO | 0.650 | 1.000 | +$23.56 | RESOLUTION |
-| BTC > $70k March 26 | NO | 0.730 | 1.000 | +$18.50 | RESOLUTION |
-| Kanye BULLY by March 27 | NO | 0.710 | 1.000 | +$17.95 | RESOLUTION |
-| Avalanche Spread (-1.5) | YES | 0.550 | 1.000 | +$38.86 | RESOLUTION |
-| (otros 7 wins + 4 losses) | — | — | — | +$65.48 | varios |
-
-Nota: las 4 primeras filas estaban atascadas (sin snapshots por mercados expirados). Cerradas manualmente via resolve_stuck_positions.py el 2026-03-28 con precios verificados en Gamma API.
+| Mercado | DIR | Entrada | Estado |
+|---------|-----|---------|--------|
+| Juan Pablo Velasco gubernatorial 2026 | NO | 0.550 | Activo, mercado sigue abierto |
 
 ---
 
@@ -132,7 +102,7 @@ src/
     polymarket_client.py      # CLOB + Gamma API wrapper
     polymarketscan_client.py  # PolymarketScan Public API (28 req/min)
     market_scanner.py         # Escanea y filtra mercados candidatos
-    snapshot_collector.py     # Precio + orderbook cada 2 min
+    snapshot_collector.py     # Precio + orderbook cada 2 min. Ventana: 6-168h
     whale_trades_collector.py # Whale trades via PMS Agent API (?action=whales)
     falcon_client.py          # Falcon herding + whale trades (standby, API rota)
     leaderboard_seeder.py     # Top traders -> watched_wallets
@@ -141,7 +111,7 @@ src/
     divergence_detector.py    # detect_whale_herding_v2 + detect_price_velocity
     momentum_filter.py        # Score de momentum (0-100)
     contrarian_logic.py       # Smart wallet score + decision de senal
-    signal_engine.py          # Combina todo -> DB signals
+    signal_engine.py          # Combina todo -> DB signals. Ventana: 6-168h (alineada con collector)
 
   trading/
     risk_manager.py           # Kelly sizing, circuit breaker, drawdown
@@ -162,7 +132,16 @@ scripts/
   run_cleanup.py              # Limpieza diaria
   setup_db.py                 # Verificar conexion y schema
   resolve_stuck_positions.py  # Cierre manual de posiciones sin snapshots + recalculo portfolio
+  cleanup_bad_signals.py      # Expira senales invalidas + cierra trades con entry fuera de [0.20, 0.80]
   test_whale_apis.py          # Test manual de APIs whale
+
+tests/
+  unit/
+    test_risk_manager.py      # Kelly (8), is_trading_allowed (9) — 17 tests
+    test_position_manager.py  # _is_resolved (9), _is_expired (7), stop/TP (6) — 22 tests
+    test_signal_filters.py    # Filtros de precio signal_engine: None, floors, ceiling, validos — 22 tests
+    test_paper_trader_pnl.py  # P&L YES/NO win/loss, propiedades — 14 tests
+  test_connections.py         # Integration tests (requieren .env real)
 
 dashboard/                    # Fase 4 — Next.js (NO en git, deploy directo a Vercel)
   src/app/
@@ -191,13 +170,15 @@ dashboard/                    # Fase 4 — Next.js (NO en git, deploy directo a 
 - **Stack:** Next.js 16.2.1 + Tailwind v4 + Recharts 3.8.1 + Supabase JS
 - **Tema:** dark SaaS, CSS custom properties (--bg-primary, --green, --red, --blue...)
 - **Auto-refresh:** 30s en Dashboard, 60s en Analytics
-- **Puerto dev:** 3001 (3000 ocupado por otra app)
+- **Puerto dev:** 3000 (antes 3001 — ya no hay conflicto)
 - **DB schema critico:**
   - `pnl_usd`, `pnl_pct` (decimal, NO porcentaje — multiplicar x100 para display)
   - `shares`, `position_usd` (NO quantity/position_size)
   - `pnl_pct` almacenado como decimal: -0.2857 = -28.57%
 - **Drawdown en dashboard:** usa `(initial_capital - current_capital) / initial_capital` (actual), NO `max_drawdown` de la DB (historico)
 - **Indicador Running/Paused:** en Sidebar, misma logica que risk_manager.is_trading_allowed()
+- **Equity curve:** ordenada por `closed_at` (fix 2026-03-29 — antes ordenaba por opened_at causando puntos fuera de orden)
+- **Analytics:** auto-selecciona run mas reciente al cargar (fix 2026-03-29 — antes defaulteaba a "All Runs" mostrando 21 en vez de 17 trades)
 - **Deploy pendiente:** Vercel — requiere SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY como env vars
 
 ---
@@ -220,6 +201,7 @@ dashboard/                    # Fase 4 — Next.js (NO en git, deploy directo a 
 - **Rango valido de entrada: [0.20, 0.80]** (simetrico, ambas direcciones)
   - < 0.20: mercado cerca de resolverse en direccion opuesta (MIN_CONTRARIAN_PRICE)
   - > 0.80: take-profit matematicamente inalcanzable en mercado binario (ceiling anadido 2026-03-28)
+- **Ventana de mercados:** 6-168h hasta resolucion (alineada entre collector y signal engine — fix 2026-03-29)
 
 ### Risk management
 - Half-Kelly sizing (Kelly x 0.5), max 5% capital por trade
@@ -248,9 +230,14 @@ dashboard/                    # Fase 4 — Next.js (NO en git, deploy directo a 
 | YES entries < 0.20 (mercados 80%+ resueltos) | 2026-03-28 | MIN_CONTRARIAN_PRICE=0.20 |
 | NO entries con entry > 0.80 (TP inalcanzable) | 2026-03-28 | Ceiling simetrico en signal_engine |
 | price=None saltaba todos los filtros en signal_engine | 2026-03-28 | Hard skip si sin precio |
-| 4 posiciones abiertas sin snapshots (mercados expirados) | 2026-03-28 | resolve_stuck_positions.py — cerradas con precios Gamma API |
-| portfolio_state desincronizado (drawdown 22.6%, capital $835) | 2026-03-28 | Reconstruido desde trade history: capital $1119, +16.4%, 73.3% WR |
-| Dashboard mostraba P&L $0 en Analytics | 2026-03-28 | Nombres de columna incorrectos (pnl vs pnl_usd, quantity vs shares) |
+| 4 posiciones abiertas sin snapshots (mercados expirados) | 2026-03-28 | resolve_stuck_positions.py |
+| portfolio_state desincronizado (drawdown 22.6%, capital $835) | 2026-03-28 | Reconstruido desde trade history |
+| Dashboard mostraba P&L $0 en Analytics | 2026-03-28 | Nombres de columna incorrectos |
+| signal_engine seleccionaba mercados fuera de ventana 6-168h | 2026-03-29 | Alineado con filtros del collector — no_data baja de 494 a 220 |
+| Paper trader spam "Position too small" con senales invalidas | 2026-03-29 | cleanup_bad_signals.py — expira senales con entry fuera de [0.20,0.80] |
+| Posicion YES@0.055 abierta con codigo buggy | 2026-03-29 | Cerrada via cleanup_bad_signals.py (exit=0.0585, +$3.56) |
+| Dashboard equity curve con punto fuera de orden (ATH en pasado) | 2026-03-29 | Sort por closed_at antes de acumular PnL |
+| Dashboard Analytics mostraba 21 trades en vez de 17 | 2026-03-29 | Auto-seleccion del run mas reciente al cargar |
 
 ---
 
@@ -285,25 +272,35 @@ CIRCUIT_BREAKER_COOLDOWN_HOURS = 24
 
 ---
 
-## Proximo paso: Test Suite (Fase 5 prep)
+## Test Suite — Estado (Fase 5)
 
-Plan acordado (2026-03-28):
+### Capa 1 — pytest puro (COMPLETA — 75/75 tests passing)
 
-**Capa 1 — pytest puro** (sin DB, determinista, repeatable):
-Casos a cubrir:
-- Filtros de precio signal_engine: 8 casos limite (None, <0.05, >0.95, <0.20, >0.80, valido)
-- Kelly sizing: edge=0, edge negativo, posicion < $1, cap al 5%
-- Circuit breaker: 0/2/3 perdidas, CB activo, CB expirado
-- is_trading_allowed: CB activo, DD >= 20%, max_positions, ok
-- Resolucion mercado: yes_price 0.97, 0.03, 0.50, None
-- Trailing stop / TP: exactamente en umbral, encima, debajo
-- Timeout: 6d, 7d exacto, 8d
-- P&L: YES ganador, YES perdedor, NO ganador, NO perdedor
+Ejecutar: `python -m pytest tests/unit/ -v`
 
-**Capa 2 — script backtest/replay** (lee snapshots reales, sin modificar DB):
-- Lee market_snapshots historicos
-- Pasa por logica de position_manager con codigo actual
-- Produce informe JSON con resultados simulados
-- Valida position_manager end-to-end con datos reales
+| Archivo | Tests | Cobertura |
+|---------|-------|-----------|
+| test_risk_manager.py | 17 | Kelly sizing, is_trading_allowed (CB, DD, max_pos) |
+| test_position_manager.py | 22 | _is_resolved, _is_expired, stop/TP thresholds |
+| test_signal_filters.py | 22 | Filtros precio: None, near-resolution, floor, ceiling, validos |
+| test_paper_trader_pnl.py | 14 | P&L YES/NO win/loss, propiedades matematicas |
 
-**Run 0 en DB (opcional):** para validar flujo de escritura completo una vez.
+### Capa 2 — Backtest/replay script (PENDIENTE)
+
+Plan:
+- Lee `market_snapshots` historicos de la DB (sin modificar nada)
+- Toma trades reales de `paper_trades` como punto de partida
+- Pasa cada snapshot por la logica de `position_manager` (stop/TP/timeout/resolution)
+- Compara decision simulada vs decision real tomada por el bot
+- Produce informe JSON: acuerdos, discrepancias, P&L simulado vs real
+- Objetivo: validar que position_manager se comporta correctamente con datos reales
+
+### Capa 3 (opcional) — Run 0 en DB
+
+Para validar flujo de escritura completo una vez con datos reales pero aislados.
+
+---
+
+## Proximo paso
+
+Capa 2: script de backtest/replay con snapshots reales.
