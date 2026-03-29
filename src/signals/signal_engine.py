@@ -26,7 +26,7 @@ from src.signals.contrarian_logic import (
     should_generate_signal,
 )
 from src.utils.logger import logger
-from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, MIN_ENTRY_PRICE, MIN_CONTRARIAN_PRICE
+from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, MIN_ENTRY_PRICE, MIN_CONTRARIAN_PRICE, MIN_HOURS_TO_RESOLUTION, MAX_HOURS_TO_RESOLUTION
 
 _CANDIDATE_TOP_N = 500
 _MIN_VOLUME = 1_000
@@ -109,7 +109,12 @@ def _get_candidate_markets() -> list:
     client = db.get_client()
     now = datetime.now(timezone.utc)
 
-    # Fetch all active unresolved markets with volume >= $1k (paginated)
+    # Fetch active unresolved markets in the same 6-168h window as the snapshot collector.
+    # Without this filter, markets with < 6h remaining score highest on proximity (1.0)
+    # but are excluded from the collector → no snapshots → no_data for 98%+ of candidates.
+    min_end = (now + timedelta(hours=MIN_HOURS_TO_RESOLUTION)).isoformat()
+    max_end = (now + timedelta(hours=MAX_HOURS_TO_RESOLUTION)).isoformat()
+
     all_markets: list[dict] = []
     offset = 0
     while True:
@@ -119,6 +124,8 @@ def _get_candidate_markets() -> list:
             .eq("is_active", True)
             .is_("resolution", "null")
             .gte("volume_24h", _MIN_VOLUME)
+            .gte("end_date", min_end)
+            .lte("end_date", max_end)
             .range(offset, offset + 999)
             .execute()
             .data
