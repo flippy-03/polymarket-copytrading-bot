@@ -258,11 +258,16 @@ export default function AnalyticsPage() {
       {shadow && (
         <div className="rounded-xl p-5 border" style={{ background: "var(--bg-card)", borderColor: "var(--border)" }}>
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold">Signal Quality — Shadow Portfolio</h3>
-              <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                Señales bloqueadas por capacidad (MAX_OPEN_POSITIONS / circuit breaker). Valida la estrategia independiente del capital.
-              </p>
+            <h3 className="text-sm font-semibold">Signal Quality — Shadow Portfolio</h3>
+            <div className="group relative">
+              <div className="w-5 h-5 rounded-full border flex items-center justify-center text-xs cursor-default select-none"
+                style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>i</div>
+              <div className="absolute right-0 top-7 w-72 rounded-lg p-3 text-xs leading-relaxed z-20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                Cuando el bot no puede abrir un trade real (máximo de posiciones o circuit breaker), registra un <strong style={{ color: "var(--text-primary)" }}>shadow trade</strong> con la misma señal. Esto permite medir la calidad de la estrategia de detección de oportunidades de forma independiente al capital disponible.
+                <br /><br />
+                <strong style={{ color: "var(--text-primary)" }}>WR Delta</strong> compara el win rate de las señales no ejecutadas vs las reales. Si shadow WR &gt; actual WR, la estrategia genera más oportunidades buenas de las que se están aprovechando.
+              </div>
             </div>
           </div>
 
@@ -278,7 +283,7 @@ export default function AnalyticsPage() {
                 <KpiCard
                   label="Shadow WR"
                   value={shadow.closed > 0 && shadowWinRate != null ? `${shadowWinRate}%` : "—"}
-                  subValue={shadow.closed > 0 ? `${shadow.wins}W / ${shadow.closed - shadow.wins}L` : "sin datos aún"}
+                  subValue={shadow.closed > 0 ? `${shadow.wins}W / ${shadow.closed - shadow.wins}L` : undefined}
                   color={shadow.closed > 0 && shadowWinRate != null ? (shadowWinRate >= 50 ? "green" : "red") : undefined}
                 />
                 <KpiCard
@@ -292,7 +297,7 @@ export default function AnalyticsPage() {
                   value={shadow.closed > 0 && wrDelta != null ? `${wrDelta >= 0 ? "+" : ""}${wrDelta}pp` : "—"}
                   subValue={shadow.closed > 0 && wrDelta != null
                     ? (wrDelta > 5 ? "Raise positions" : wrDelta < -5 ? "Filter works" : "Consistent")
-                    : "acumulando datos"}
+                    : undefined}
                   color={shadow.closed > 0 && wrDelta != null
                     ? (wrDelta > 5 ? "green" : wrDelta < -5 ? "red" : "blue") as any
                     : undefined}
@@ -300,7 +305,6 @@ export default function AnalyticsPage() {
                 <KpiCard
                   label="Shadow P&L"
                   value={shadow.closed > 0 ? formatPnl(shadow.totalPnl) : "—"}
-                  subValue="norm. $10/trade"
                   color={shadow.closed > 0 ? (shadow.totalPnl >= 0 ? "green" : "red") : undefined}
                 />
               </div>
@@ -314,12 +318,6 @@ export default function AnalyticsPage() {
                     </span>
                   ))}
                 </div>
-              )}
-
-              {shadow.closed === 0 && shadow.open === 0 && (
-                <p className="text-xs mt-3" style={{ color: "var(--text-secondary)" }}>
-                  Shadow trades se generarán cuando el bot tenga señales bloqueadas por límite de posiciones o circuit breaker.
-                </p>
               )}
             </>
           )}
