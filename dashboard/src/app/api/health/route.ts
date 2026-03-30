@@ -62,7 +62,10 @@ export async function GET() {
     .gte("snapshot_at", since1h);
 
   const lastSnapAt = lastSnap?.[0]?.snapshot_at ?? null;
-  const snapAgeMs = lastSnapAt ? now.getTime() - new Date(lastSnapAt).getTime() : null;
+  // Supabase returns timestamps without 'Z' — force UTC parsing to avoid local-time offset
+  const snapAgeMs = lastSnapAt
+    ? now.getTime() - new Date(lastSnapAt.endsWith("Z") ? lastSnapAt : lastSnapAt + "Z").getTime()
+    : null;
   const collectorOk = snapAgeMs !== null && snapAgeMs < 10 * 60 * 1000;
 
   // Issues

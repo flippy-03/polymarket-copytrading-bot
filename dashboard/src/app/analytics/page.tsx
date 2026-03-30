@@ -261,68 +261,67 @@ export default function AnalyticsPage() {
             <div>
               <h3 className="text-sm font-semibold">Signal Quality — Shadow Portfolio</h3>
               <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                Señales no ejecutadas por límite de capacidad. Mide la calidad de la estrategia independiente del capital.
+                Señales bloqueadas por capacidad (MAX_OPEN_POSITIONS / circuit breaker). Valida la estrategia independiente del capital.
               </p>
             </div>
-            {shadow.tableExists && shadow.closed > 0 && wrDelta !== null && (
-              <div className="text-right">
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>Shadow vs Actual WR</p>
-                <p className="text-sm font-bold" style={{ color: wrDelta >= 0 ? COLORS.green : COLORS.red }}>
-                  {wrDelta >= 0 ? "+" : ""}{wrDelta}pp
-                </p>
-              </div>
-            )}
           </div>
 
           {!shadow.tableExists ? (
             <p className="text-xs" style={{ color: COLORS.red }}>
               Tabla shadow_trades no encontrada — ejecutar setup_shadow_trades.sql en Supabase
             </p>
-          ) : shadow.closed === 0 && shadow.open === 0 ? (
-            <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              Sin shadow trades aún — se generarán cuando haya señales bloqueadas por MAX_OPEN_POSITIONS o circuit breaker
-            </p>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              <KpiCard label="Shadow Closed" value={shadow.closed.toString()} />
-              <KpiCard label="Shadow Open" value={shadow.open.toString()} />
-              <KpiCard
-                label="Shadow WR"
-                value={shadowWinRate != null ? `${shadowWinRate}%` : "—"}
-                subValue={`${shadow.wins}W / ${shadow.closed - shadow.wins}L`}
-                color={shadowWinRate != null && shadowWinRate >= 50 ? "green" : "red"}
-              />
-              <KpiCard
-                label="Actual WR"
-                value={`${actualWinRate}%`}
-                subValue={`${stats.wins}W / ${stats.losses}L`}
-                color={actualWinRate >= 50 ? "green" : "red"}
-              />
-              <KpiCard
-                label="WR Delta"
-                value={wrDelta != null ? `${wrDelta >= 0 ? "+" : ""}${wrDelta}pp` : "—"}
-                subValue={wrDelta != null ? (wrDelta > 5 ? "Raise positions" : wrDelta < -5 ? "Filter works" : "Consistent") : ""}
-                color={wrDelta != null ? (wrDelta > 5 ? "green" : wrDelta < -5 ? "red" : "blue") as any : undefined}
-              />
-              <KpiCard
-                label="Shadow P&L"
-                value={formatPnl(shadow.totalPnl)}
-                subValue="normalized $10/trade"
-                color={shadow.totalPnl >= 0 ? "green" : "red"}
-              />
-            </div>
-          )}
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <KpiCard label="Shadow Closed" value={shadow.closed.toString()} />
+                <KpiCard label="Shadow Open" value={shadow.open.toString()} />
+                <KpiCard
+                  label="Shadow WR"
+                  value={shadow.closed > 0 && shadowWinRate != null ? `${shadowWinRate}%` : "—"}
+                  subValue={shadow.closed > 0 ? `${shadow.wins}W / ${shadow.closed - shadow.wins}L` : "sin datos aún"}
+                  color={shadow.closed > 0 && shadowWinRate != null ? (shadowWinRate >= 50 ? "green" : "red") : undefined}
+                />
+                <KpiCard
+                  label="Actual WR"
+                  value={`${actualWinRate}%`}
+                  subValue={`${stats.wins}W / ${stats.losses}L`}
+                  color={actualWinRate >= 50 ? "green" : "red"}
+                />
+                <KpiCard
+                  label="WR Delta"
+                  value={shadow.closed > 0 && wrDelta != null ? `${wrDelta >= 0 ? "+" : ""}${wrDelta}pp` : "—"}
+                  subValue={shadow.closed > 0 && wrDelta != null
+                    ? (wrDelta > 5 ? "Raise positions" : wrDelta < -5 ? "Filter works" : "Consistent")
+                    : "acumulando datos"}
+                  color={shadow.closed > 0 && wrDelta != null
+                    ? (wrDelta > 5 ? "green" : wrDelta < -5 ? "red" : "blue") as any
+                    : undefined}
+                />
+                <KpiCard
+                  label="Shadow P&L"
+                  value={shadow.closed > 0 ? formatPnl(shadow.totalPnl) : "—"}
+                  subValue="norm. $10/trade"
+                  color={shadow.closed > 0 ? (shadow.totalPnl >= 0 ? "green" : "red") : undefined}
+                />
+              </div>
 
-          {/* Close reason breakdown for shadow trades */}
-          {shadow.closed > 0 && Object.keys(shadow.byCloseReason).length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {Object.entries(shadow.byCloseReason as Record<string, number>).map(([reason, count]) => (
-                <span key={reason} className="px-2 py-0.5 rounded text-xs border"
-                  style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
-                  {reason}: {count}
-                </span>
-              ))}
-            </div>
+              {shadow.closed > 0 && Object.keys(shadow.byCloseReason).length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {Object.entries(shadow.byCloseReason as Record<string, number>).map(([reason, count]) => (
+                    <span key={reason} className="px-2 py-0.5 rounded text-xs border"
+                      style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
+                      {reason}: {count}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {shadow.closed === 0 && shadow.open === 0 && (
+                <p className="text-xs mt-3" style={{ color: "var(--text-secondary)" }}>
+                  Shadow trades se generarán cuando el bot tenga señales bloqueadas por límite de posiciones o circuit breaker.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
