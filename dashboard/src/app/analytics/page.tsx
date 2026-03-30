@@ -157,8 +157,13 @@ export default function AnalyticsPage() {
   const { data: allTrades } = useAutoRefresh<any[]>(tradesFetcher, 60000);
 
   // Shadow trades
+  const [historyTab, setHistoryTab] = useState<"real" | "shadow">("real");
+
   const shadowFetcher = useCallback(() => fetch("/api/health").then((r) => r.json()), []);
   const { data: healthLive } = useAutoRefresh<any>(shadowFetcher, 60000);
+
+  const shadowTradesFetcher = useCallback(() => fetch("/api/shadow-trades?limit=500").then((r) => r.json()), []);
+  const { data: shadowTrades } = useAutoRefresh<any[]>(shadowTradesFetcher, 60000);
 
   const handleHealthCheck = async () => {
     setHealthLoading(true);
@@ -472,39 +477,109 @@ export default function AnalyticsPage() {
         )}
       </div>
 
-      {/* Full Trade History Table */}
+      {/* Trade History — tabbed */}
       <div className="rounded-xl border overflow-hidden" style={{ background: "var(--bg-card)", borderColor: "var(--border)" }}>
         <div className="px-5 py-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
-          <h3 className="text-sm font-medium">Complete Trade History</h3>
-          <ExportButton trades={allTrades ?? []} />
+          {/* Tabs */}
+          <div className="flex gap-1 p-1 rounded-lg" style={{ background: "var(--bg-primary)" }}>
+            {(["real", "shadow"] as const).map((tab) => (
+              <button key={tab} onClick={() => setHistoryTab(tab)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                style={{
+                  background: historyTab === tab ? "var(--bg-card)" : "transparent",
+                  color: historyTab === tab ? "var(--text-primary)" : "var(--text-secondary)",
+                }}>
+                {tab === "real" ? `Trades reales (${(allTrades ?? []).length})` : `Shadow trades (${(shadowTrades ?? []).length})`}
+              </button>
+            ))}
+          </div>
+          {historyTab === "real" && <ExportButton trades={allTrades ?? []} />}
         </div>
+
         <div className="overflow-x-auto max-h-96">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0" style={{ background: "var(--bg-card)" }}>
-              <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}>
-                <th className="text-left px-5 py-2 font-medium">Date</th>
-                <th className="text-left px-3 py-2 font-medium">Market</th>
-                <th className="text-center px-3 py-2 font-medium">Side</th>
-                <th className="text-right px-3 py-2 font-medium">Entry</th>
-                <th className="text-right px-3 py-2 font-medium">Exit</th>
-                <th className="text-right px-3 py-2 font-medium">Size</th>
-                <th className="text-right px-3 py-2 font-medium">P&L</th>
-                <th className="text-right px-3 py-2 font-medium">Return</th>
-                <th className="text-right px-3 py-2 font-medium">Hold</th>
-                <th className="text-right px-5 py-2 font-medium">Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(allTrades ?? []).map((t: any) => {
-                const holdHours = t.opened_at && t.closed_at
-                  ? ((new Date(t.closed_at).getTime() - new Date(t.opened_at).getTime()) / (1000 * 60 * 60)).toFixed(1)
-                  : "—";
-                return (
+          {historyTab === "real" ? (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0" style={{ background: "var(--bg-card)" }}>
+                <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}>
+                  <th className="text-left px-5 py-2 font-medium">Date</th>
+                  <th className="text-left px-3 py-2 font-medium">Market</th>
+                  <th className="text-center px-3 py-2 font-medium">Side</th>
+                  <th className="text-right px-3 py-2 font-medium">Entry</th>
+                  <th className="text-right px-3 py-2 font-medium">Exit</th>
+                  <th className="text-right px-3 py-2 font-medium">Size</th>
+                  <th className="text-right px-3 py-2 font-medium">P&L</th>
+                  <th className="text-right px-3 py-2 font-medium">Return</th>
+                  <th className="text-right px-3 py-2 font-medium">Hold</th>
+                  <th className="text-right px-5 py-2 font-medium">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(allTrades ?? []).map((t: any) => {
+                  const holdHours = t.opened_at && t.closed_at
+                    ? ((new Date(t.closed_at).getTime() - new Date(t.opened_at).getTime()) / (1000 * 60 * 60)).toFixed(1)
+                    : "—";
+                  return (
+                    <tr key={t.id} className="border-t" style={{ borderColor: "var(--border)" }}>
+                      <td className="px-5 py-2 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>
+                        {(t.closed_at ?? t.opened_at)?.slice(0, 10)}
+                      </td>
+                      <td className="px-3 py-2 max-w-48 truncate">{t.market_question}</td>
+                      <td className="text-center px-3 py-2">
+                        <span className="px-2 py-0.5 rounded text-xs font-bold"
+                          style={{
+                            background: t.direction === "YES" ? "var(--green-dim)" : "var(--red-dim)",
+                            color: t.direction === "YES" ? "var(--green)" : "var(--red)",
+                          }}>
+                          {t.direction}
+                        </span>
+                      </td>
+                      <td className="text-right px-3 py-2">${t.entry_price?.toFixed(3)}</td>
+                      <td className="text-right px-3 py-2">{t.exit_price ? `$${t.exit_price.toFixed(3)}` : "—"}</td>
+                      <td className="text-right px-3 py-2">${t.position_usd?.toFixed(2)}</td>
+                      <td className="text-right px-3 py-2 font-medium" style={{ color: pnlColor(t.pnl_usd) }}>
+                        {formatPnl(t.pnl_usd)}
+                      </td>
+                      <td className="text-right px-3 py-2" style={{ color: pnlColor(t.pnl_pct) }}>
+                        {formatPct((t.pnl_pct ?? 0) * 100)}
+                      </td>
+                      <td className="text-right px-3 py-2" style={{ color: "var(--text-secondary)" }}>{holdHours}h</td>
+                      <td className="text-right px-5 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+                        {t.close_reason ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0" style={{ background: "var(--bg-card)" }}>
+                <tr style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}>
+                  <th className="text-left px-5 py-2 font-medium">Date</th>
+                  <th className="text-left px-3 py-2 font-medium">Market</th>
+                  <th className="text-center px-3 py-2 font-medium">Side</th>
+                  <th className="text-right px-3 py-2 font-medium">Entry</th>
+                  <th className="text-right px-3 py-2 font-medium">Exit</th>
+                  <th className="text-right px-3 py-2 font-medium">Size</th>
+                  <th className="text-right px-3 py-2 font-medium">P&L</th>
+                  <th className="text-right px-3 py-2 font-medium">Return</th>
+                  <th className="text-right px-3 py-2 font-medium">Reason</th>
+                  <th className="text-right px-5 py-2 font-medium">Bloqueado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(shadowTrades ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-5 py-8 text-center text-xs" style={{ color: "var(--text-secondary)" }}>
+                      Sin shadow trades aún
+                    </td>
+                  </tr>
+                ) : (shadowTrades ?? []).map((t: any) => (
                   <tr key={t.id} className="border-t" style={{ borderColor: "var(--border)" }}>
                     <td className="px-5 py-2 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>
-                      {(t.closed_at ?? t.opened_at)?.slice(0, 10)}
+                      {(t.exit_at ?? t.entry_at)?.slice(0, 10)}
                     </td>
-                    <td className="px-3 py-2 max-w-48 truncate">{t.market_question}</td>
+                    <td className="px-3 py-2 max-w-48 truncate">{t.market_question || "—"}</td>
                     <td className="text-center px-3 py-2">
                       <span className="px-2 py-0.5 rounded text-xs font-bold"
                         style={{
@@ -514,24 +589,26 @@ export default function AnalyticsPage() {
                         {t.direction}
                       </span>
                     </td>
-                    <td className="text-right px-3 py-2">${t.entry_price?.toFixed(3)}</td>
-                    <td className="text-right px-3 py-2">{t.exit_price ? `$${t.exit_price.toFixed(3)}` : "—"}</td>
-                    <td className="text-right px-3 py-2">${t.position_usd?.toFixed(2)}</td>
+                    <td className="text-right px-3 py-2">${Number(t.entry_price)?.toFixed(3)}</td>
+                    <td className="text-right px-3 py-2">{t.exit_price ? `$${Number(t.exit_price).toFixed(3)}` : "—"}</td>
+                    <td className="text-right px-3 py-2">{t.position_usd ? `$${Number(t.position_usd).toFixed(2)}` : "—"}</td>
                     <td className="text-right px-3 py-2 font-medium" style={{ color: pnlColor(t.pnl_usd) }}>
-                      {formatPnl(t.pnl_usd)}
+                      {t.pnl_usd != null ? formatPnl(t.pnl_usd) : <span style={{ color: "var(--text-secondary)" }}>open</span>}
                     </td>
                     <td className="text-right px-3 py-2" style={{ color: pnlColor(t.pnl_pct) }}>
-                      {formatPct((t.pnl_pct ?? 0) * 100)}
+                      {t.pnl_pct != null ? formatPct(t.pnl_pct * 100) : "—"}
                     </td>
-                    <td className="text-right px-3 py-2" style={{ color: "var(--text-secondary)" }}>{holdHours}h</td>
+                    <td className="text-right px-3 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+                      {t.close_reason ?? <span style={{ color: COLORS.blue }}>OPEN</span>}
+                    </td>
                     <td className="text-right px-5 py-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                      {t.close_reason ?? "—"}
+                      {t.blocked_reason?.split(" ")[0] ?? "—"}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

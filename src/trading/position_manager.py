@@ -254,8 +254,14 @@ def check_shadow_positions() -> int:
                 close_reason = "TAKE_PROFIT"
 
         if close_reason:
-            pnl_usd = round((current_price - entry_price) * (10 / entry_price), 2)  # normalized $10 unit
-            pnl_pct = round((current_price - entry_price) / entry_price, 4)
+            shares_shadow = float(trade.get("shares") or 0)
+            pos_usd_shadow = float(trade.get("position_usd") or 0)
+            if shares_shadow > 0:
+                pnl_usd = round((current_price - entry_price) * shares_shadow, 2)
+            else:
+                # Fallback for legacy rows without shares (pre-migration)
+                pnl_usd = round((current_price - entry_price) / entry_price * 10, 2)
+            pnl_pct = round((current_price - entry_price) / entry_price, 4) if entry_price else 0
             client.table("shadow_trades").update({
                 "exit_price": current_price,
                 "exit_at": now,

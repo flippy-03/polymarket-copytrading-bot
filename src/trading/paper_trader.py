@@ -256,6 +256,13 @@ def open_shadow_trade(signal: dict, blocked_reason: str) -> bool:
         return False
 
     state = get_portfolio_state(client)
+
+    # Calculate real Kelly sizing so P&L reflects actual would-be exposure
+    capital = float(state["current_capital"]) if state else 1000.0
+    confidence = float(signal.get("confidence") or 0.55)
+    position_usd = kelly_position_size(confidence, (1 / entry_price) - 1, capital)
+    shares = round(position_usd / entry_price, 4) if entry_price > 0 else 0
+
     shadow = {
         "signal_id": signal["id"],
         "market_id": signal["market_id"],
@@ -263,12 +270,14 @@ def open_shadow_trade(signal: dict, blocked_reason: str) -> bool:
         "entry_price": entry_price,
         "entry_at": datetime.now(tz=timezone.utc).isoformat(),
         "blocked_reason": blocked_reason,
+        "position_usd": position_usd,
+        "shares": shares,
         "status": "OPEN",
         "run_id": state["run_id"] if state else None,
     }
     client.table("shadow_trades").insert(shadow).execute()
     logger.debug(
         f"Shadow trade opened: {direction} @ {entry_price:.3f} "
-        f"(blocked: {blocked_reason})"
+        f"${position_usd:.2f} (blocked: {blocked_reason})"
     )
     return True
