@@ -9,6 +9,8 @@ Close reasons:
   CIRCUIT_BREAKER — manual / risk-triggered close
 """
 
+import json
+import urllib.request
 from datetime import datetime, timezone, timedelta
 
 from src.db import supabase_client as db
@@ -23,22 +25,63 @@ from src.utils.logger import logger
 
 MAX_TRADE_DAYS = 7
 RESOLUTION_THRESHOLD = 0.97  # yes_price > 0.97 = resolved YES, < 0.03 = resolved NO
+STALE_SNAPSHOT_HOURS = 3     # fallback to Gamma API if snapshot is older than this
+
+
+def _fetch_yes_price_gamma(client, market_id: str) -> float | None:
+    """Fetch current yes_price directly from Gamma API as fallback for stale snapshots."""
+    try:
+        market = (
+            client.table("markets")
+            .select("polymarket_id")
+            .eq("id", market_id)
+            .execute()
+            .data
+        )
+        if not market or not market[0].get("polymarket_id"):
+            return None
+        polymarket_id = market[0]["polymarket_id"]
+        url = f"https://gamma-api.polymarket.com/markets/{polymarket_id}"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read())
+        prices = data.get("outcomePrices")
+        if prices and len(prices) >= 1:
+            return float(prices[0])  # prices[0] = YES
+        return None
+    except Exception as e:
+        logger.warning(f"Gamma API fallback failed for market {market_id[:8]}...: {e}")
+        return None
 
 
 def _get_latest_price(client, market_id: str, direction: str) -> float | None:
     result = (
         client.table("market_snapshots")
-        .select("yes_price")
+        .select("yes_price, snapshot_at")
         .eq("market_id", market_id)
         .not_.is_("yes_price", "null")
         .order("snapshot_at", desc=True)
         .limit(1)
         .execute()
     )
-    if not result.data:
+    if result.data:
+        snap = result.data[0]
+        snap_dt = datetime.fromisoformat(snap["snapshot_at"])
+        if snap_dt.tzinfo is None:
+            snap_dt = snap_dt.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(tz=timezone.utc) - snap_dt).total_seconds() / 3600
+        if age_hours <= STALE_SNAPSHOT_HOURS:
+            yes_price = float(snap["yes_price"])
+            return yes_price if direction == "YES" else round(1 - yes_price, 4)
+        logger.warning(
+            f"Snapshot for {market_id[:8]}... is {age_hours:.1f}h old — "
+            f"falling back to Gamma API"
+        )
+
+    # Fallback: snapshot missing or stale → query Gamma API directly
+    yes_price = _fetch_yes_price_gamma(client, market_id)
+    if yes_price is None:
         return None
-    yes_price = float(result.data[0]["yes_price"])
-    # For NO trades, flip the price perspective
+    logger.info(f"Gamma API fallback price for {market_id[:8]}...: YES={yes_price:.3f}")
     return yes_price if direction == "YES" else round(1 - yes_price, 4)
 
 

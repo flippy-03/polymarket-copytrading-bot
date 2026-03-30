@@ -93,6 +93,9 @@ def get_active_markets_from_db() -> list[dict]:
     Prioritizes markets closest to resolution (matching signal engine's 40% proximity
     weight) within the 6-168h window. Paginated to cover all markets in DB.
     Capped at 1200 to stay within collector throughput per 2-min cycle.
+
+    Always includes markets with OPEN paper_trades regardless of end_date, so
+    the position manager never goes blind on a held position.
     """
     client = db.get_client()
     now = datetime.now(tz=timezone.utc)
@@ -120,5 +123,36 @@ def get_active_markets_from_db() -> list[dict]:
         if len(batch) < 1000:
             break
         offset += 1000
+
+    # Always include markets with OPEN positions even if outside the date window.
+    # Polymarket end_date is the event date, not the resolution date — markets can
+    # stay open days after the event. Without this, the collector goes blind and the
+    # position manager can no longer detect TP/stop/resolution.
+    open_trades = (
+        client.table("paper_trades")
+        .select("market_id")
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+    if open_trades:
+        existing_ids = {m["id"] for m in all_markets}
+        for trade in open_trades:
+            mid = trade["market_id"]
+            if mid not in existing_ids:
+                extra = (
+                    client.table("markets")
+                    .select("*")
+                    .eq("id", mid)
+                    .execute()
+                    .data
+                )
+                if extra:
+                    all_markets.extend(extra)
+                    existing_ids.add(mid)
+                    logger.info(
+                        f"Collector: added open-position market {mid[:8]}... "
+                        f"(outside date window — end_date may be pre-resolution)"
+                    )
 
     return all_markets[:1200]
