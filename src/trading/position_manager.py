@@ -187,3 +187,92 @@ def check_open_positions() -> int:
         logger.info(f"Position manager: closed {closed} trade(s)")
 
     return closed
+
+
+def check_shadow_positions() -> int:
+    """
+    Check all OPEN shadow trades and close those that hit stop/TP/timeout/resolution.
+    Mirror of check_open_positions() but operates on shadow_trades table.
+    No circuit breaker or portfolio updates — shadow trades are read-only for risk.
+    Returns number of shadow trades closed.
+    """
+    client = db.get_client()
+
+    shadow_trades = (
+        client.table("shadow_trades")
+        .select("*")
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+
+    if not shadow_trades:
+        return 0
+
+    closed = 0
+    now = datetime.now(tz=timezone.utc).isoformat()
+
+    for trade in shadow_trades:
+        market_id = trade["market_id"]
+        direction = trade["direction"]
+        entry_price = float(trade["entry_price"])
+
+        current_price = _get_latest_price(client, market_id, direction)
+        if current_price is None:
+            continue
+
+        close_reason = None
+
+        # 1. Resolution
+        raw_yes = _get_latest_price(client, market_id, "YES")
+        if raw_yes is not None:
+            resolved, yes_exit = _is_resolved(raw_yes)
+            if resolved:
+                exit_price = yes_exit if direction == "YES" else round(1 - yes_exit, 4)
+                close_reason = "RESOLUTION"
+                current_price = exit_price
+
+        if close_reason is None:
+            entry_at = trade.get("entry_at", "")
+            # 2. Timeout (use entry_at as trade open time)
+            if entry_at:
+                try:
+                    dt = datetime.fromisoformat(entry_at)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if datetime.now(tz=timezone.utc) > dt + timedelta(days=MAX_TRADE_DAYS):
+                        close_reason = "TIMEOUT"
+                except Exception:
+                    pass
+
+            # 3. Trailing stop
+            if close_reason is None and current_price <= entry_price * (1 - TRAILING_STOP_PCT):
+                close_reason = "TRAILING_STOP"
+
+            # 4. Take profit
+            elif close_reason is None and current_price >= entry_price * (1 + TAKE_PROFIT_PCT):
+                close_reason = "TAKE_PROFIT"
+
+        if close_reason:
+            pnl_usd = round((current_price - entry_price) * (10 / entry_price), 2)  # normalized $10 unit
+            pnl_pct = round((current_price - entry_price) / entry_price, 4)
+            client.table("shadow_trades").update({
+                "exit_price": current_price,
+                "exit_at": now,
+                "close_reason": close_reason,
+                "pnl_usd": pnl_usd,
+                "pnl_pct": pnl_pct,
+                "status": "CLOSED",
+            }).eq("id", trade["id"]).execute()
+            closed += 1
+            result_str = "WIN" if pnl_usd > 0 else "LOSS"
+            logger.debug(
+                f"Shadow [{result_str}] {direction} {close_reason} "
+                f"entry={entry_price:.3f} exit={current_price:.3f} "
+                f"P&L ${pnl_usd:+.2f}"
+            )
+
+    if closed:
+        logger.info(f"Shadow position manager: closed {closed} shadow trade(s)")
+
+    return closed

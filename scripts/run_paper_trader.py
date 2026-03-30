@@ -17,8 +17,8 @@ import schedule
 from datetime import datetime, timezone
 
 from src.db import supabase_client as db
-from src.trading.paper_trader import open_trade
-from src.trading.position_manager import check_open_positions
+from src.trading.paper_trader import open_trade, open_shadow_trade
+from src.trading.position_manager import check_open_positions, check_shadow_positions
 from src.trading.portfolio_tracker import print_portfolio_summary, get_open_trades
 from src.trading.risk_manager import get_portfolio_state, is_trading_allowed
 from src.utils.logger import logger
@@ -27,6 +27,7 @@ from src.utils.logger import logger
 def job_check_positions():
     """Check all open positions for stop/TP/timeout/resolution."""
     closed = check_open_positions()
+    check_shadow_positions()
     if closed:
         logger.info(f"Closed {closed} position(s) this cycle")
 
@@ -36,11 +37,6 @@ def job_open_new_trades():
     client = db.get_client()
     state = get_portfolio_state(client)
     if not state:
-        return
-
-    allowed, reason = is_trading_allowed(state)
-    if not allowed:
-        logger.info(f"New trades blocked: {reason}")
         return
 
     # Get ACTIVE signals not yet traded
@@ -56,6 +52,19 @@ def job_open_new_trades():
 
     if not signals:
         logger.debug("No active signals to trade")
+        return
+
+    allowed, reason = is_trading_allowed(state)
+
+    if not allowed:
+        logger.info(f"New trades blocked: {reason}")
+        # Capacity block — open shadow trades so signal quality is tracked
+        shadows = 0
+        for signal in signals:
+            if open_shadow_trade(signal, reason):
+                shadows += 1
+        if shadows:
+            logger.info(f"Opened {shadows} shadow trade(s) (blocked: {reason})")
         return
 
     # Check which markets already have an open trade (avoid duplicates)

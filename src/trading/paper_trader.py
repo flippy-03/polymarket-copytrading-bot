@@ -10,8 +10,17 @@ from src.trading.risk_manager import (
     is_trading_allowed,
     kelly_position_size,
 )
-from src.utils.config import TRAILING_STOP_PCT, TAKE_PROFIT_PCT, MAX_SIGNAL_DRIFT_PCT
+from src.utils.config import (
+    TRAILING_STOP_PCT,
+    TAKE_PROFIT_PCT,
+    MAX_SIGNAL_DRIFT_PCT,
+    MIN_CONTRARIAN_PRICE,
+)
 from src.utils.logger import logger
+
+# Reasons that reflect execution CAPACITY, not signal quality.
+# Shadow trades are only opened when blocked for these reasons.
+_CAPACITY_BLOCK_REASONS = {"max_open_positions", "circuit_breaker", "max_drawdown"}
 
 
 def _get_current_price(market_id: str) -> float | None:
@@ -207,3 +216,59 @@ def close_trade(trade: dict, exit_price: float, reason: str) -> dict | None:
     )
 
     return trade
+
+
+def open_shadow_trade(signal: dict, blocked_reason: str) -> bool:
+    """
+    Record a shadow trade for a signal that was blocked by capacity constraints
+    (MAX_OPEN_POSITIONS, circuit_breaker, max_drawdown) — not by signal quality.
+
+    Shadow trades track what the strategy WOULD have done, enabling signal quality
+    validation independent of portfolio state.
+
+    Returns True if a new shadow trade was created.
+    """
+    # Only open shadows for capacity blocks, not quality rejects
+    reason_key = blocked_reason.split(" ")[0].lower()
+    if not any(reason_key.startswith(k.split("_")[0]) for k in _CAPACITY_BLOCK_REASONS):
+        return False
+
+    direction = signal["direction"]
+    yes_price = float(signal["price_at_signal"])
+    entry_price = yes_price if direction == "YES" else round(1 - yes_price, 4)
+
+    # Skip if entry is outside the valid contrarian range — signal engine should
+    # have filtered these, but guard against legacy signals in DB.
+    if entry_price < MIN_CONTRARIAN_PRICE or entry_price > (1 - MIN_CONTRARIAN_PRICE):
+        return False
+
+    client = db.get_client()
+
+    # Avoid duplicate shadow trades for the same signal
+    existing = (
+        client.table("shadow_trades")
+        .select("id")
+        .eq("signal_id", signal["id"])
+        .execute()
+        .data
+    )
+    if existing:
+        return False
+
+    state = get_portfolio_state(client)
+    shadow = {
+        "signal_id": signal["id"],
+        "market_id": signal["market_id"],
+        "direction": direction,
+        "entry_price": entry_price,
+        "entry_at": datetime.now(tz=timezone.utc).isoformat(),
+        "blocked_reason": blocked_reason,
+        "status": "OPEN",
+        "run_id": state["run_id"] if state else None,
+    }
+    client.table("shadow_trades").insert(shadow).execute()
+    logger.debug(
+        f"Shadow trade opened: {direction} @ {entry_price:.3f} "
+        f"(blocked: {blocked_reason})"
+    )
+    return True
