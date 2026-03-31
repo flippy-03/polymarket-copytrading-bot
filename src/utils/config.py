@@ -43,8 +43,8 @@ SPORTS_QUESTION_KEYWORDS = [
 ]
 
 # Crypto price-target markets ("Will BTC reach $70k?", "Will ETH dip to $1,900?").
-# Shadow trade analysis shows 0% WR and -$64 P&L on these vs 66.7% WR +$34 on event markets.
-# The contrarian whale+velocity signal has no edge on speculative crypto price-range markets.
+# Shadow trade analysis: 0% WR -$64 P&L vs 66.7% WR +$34 for event markets.
+# Correlated intra-day (all move together on macro events) → capped at MAX_CRYPTO_POSITIONS.
 PRICE_TARGET_KEYWORDS = [
     "reach $",
     "dip to $",
@@ -59,6 +59,10 @@ PRICE_TARGET_KEYWORDS = [
     "price of eth",
     "price of btc",
 ]
+
+# Max simultaneous open positions in crypto price-target markets.
+# Limits correlated drawdown on macro shock days (e.g. March 31: 5 simultaneous → -$79).
+MAX_CRYPTO_POSITIONS = 3
 
 # Precio minimo de entrada para evitar mercados sub-centavo con volatilidad absurda.
 # Un precio de 0.009 significa spread relativo del 10%+, destruye el edge.

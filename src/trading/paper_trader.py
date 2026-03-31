@@ -15,12 +15,42 @@ from src.utils.config import (
     TAKE_PROFIT_PCT,
     MAX_SIGNAL_DRIFT_PCT,
     MIN_CONTRARIAN_PRICE,
+    PRICE_TARGET_KEYWORDS,
+    MAX_CRYPTO_POSITIONS,
 )
 from src.utils.logger import logger
 
 # Reasons that reflect execution CAPACITY, not signal quality.
 # Shadow trades are only opened when blocked for these reasons.
-_CAPACITY_BLOCK_REASONS = {"max_open_positions", "circuit_breaker", "max_drawdown"}
+_CAPACITY_BLOCK_REASONS = {"max_open_positions", "circuit_breaker", "max_drawdown", "crypto_position_limit"}
+
+
+def _is_price_target_market(question: str) -> bool:
+    """Return True if this is a crypto price-target market (BTC/ETH reach/dip/above $X)."""
+    q = (question or "").lower()
+    return any(kw in q for kw in PRICE_TARGET_KEYWORDS)
+
+
+def _count_open_crypto_positions(client) -> int:
+    """Count currently open trades in crypto price-target markets."""
+    open_trades = (
+        client.table("paper_trades")
+        .select("market_id")
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+    if not open_trades:
+        return 0
+    market_ids = [t["market_id"] for t in open_trades]
+    markets = (
+        client.table("markets")
+        .select("id,question")
+        .in_("id", market_ids)
+        .execute()
+        .data
+    )
+    return sum(1 for m in markets if _is_price_target_market(m.get("question", "")))
 
 
 def _get_current_price(market_id: str) -> float | None:
@@ -58,6 +88,15 @@ def open_trade(signal: dict) -> dict | None:
 
     market_id = signal["market_id"]
     direction = signal["direction"]  # YES | NO
+
+    # Check crypto price-target concentration limit
+    market_row = client.table("markets").select("question").eq("id", market_id).limit(1).execute().data
+    market_question = market_row[0]["question"] if market_row else ""
+    if _is_price_target_market(market_question):
+        crypto_open = _count_open_crypto_positions(client)
+        if crypto_open >= MAX_CRYPTO_POSITIONS:
+            logger.info(f"Trade blocked: crypto_position_limit ({crypto_open}/{MAX_CRYPTO_POSITIONS} crypto open)")
+            return None
 
     # Use price at signal time — reflects what would have been traded in production
     # (in production the trader runs 24/7 so signal and trade happen within seconds)
