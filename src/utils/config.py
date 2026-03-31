@@ -64,6 +64,10 @@ PRICE_TARGET_KEYWORDS = [
 # Limits correlated drawdown on macro shock days (e.g. March 31: 5 simultaneous → -$79).
 MAX_CRYPTO_POSITIONS = 3
 
+# Cooldown after a market closes via TRAILING_STOP or TAKE_PROFIT.
+# Prevents re-entering the same market within this window (e.g. ETH $2100 traded twice in 35min).
+MARKET_REENTRY_COOLDOWN_HOURS = 24
+
 # Precio minimo de entrada para evitar mercados sub-centavo con volatilidad absurda.
 # Un precio de 0.009 significa spread relativo del 10%+, destruye el edge.
 MIN_ENTRY_PRICE = 0.05

@@ -17,6 +17,7 @@ from src.utils.config import (
     MIN_CONTRARIAN_PRICE,
     PRICE_TARGET_KEYWORDS,
     MAX_CRYPTO_POSITIONS,
+    MARKET_REENTRY_COOLDOWN_HOURS,
 )
 from src.utils.logger import logger
 
@@ -51,6 +52,26 @@ def _count_open_crypto_positions(client) -> int:
         .data
     )
     return sum(1 for m in markets if _is_price_target_market(m.get("question", "")))
+
+
+def _is_market_in_cooldown(client, market_id: str) -> bool:
+    """
+    Return True if this market had a TRAILING_STOP or TAKE_PROFIT close within
+    MARKET_REENTRY_COOLDOWN_HOURS. Prevents re-entering the same market after a stop/TP.
+    RESOLUTION is excluded — market already resolved, no re-entry possible anyway.
+    """
+    cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=MARKET_REENTRY_COOLDOWN_HOURS)).isoformat()
+    result = (
+        client.table("paper_trades")
+        .select("id")
+        .eq("market_id", market_id)
+        .eq("status", "CLOSED")
+        .in_("close_reason", ["TRAILING_STOP", "TAKE_PROFIT"])
+        .gte("closed_at", cutoff)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
 
 
 def _get_current_price(market_id: str) -> float | None:
@@ -89,9 +110,16 @@ def open_trade(signal: dict) -> dict | None:
     market_id = signal["market_id"]
     direction = signal["direction"]  # YES | NO
 
-    # Check crypto price-target concentration limit
+    # Fetch market question once — used for multiple checks below
     market_row = client.table("markets").select("question").eq("id", market_id).limit(1).execute().data
     market_question = market_row[0]["question"] if market_row else ""
+
+    # Check re-entry cooldown — don't trade a market stopped/TP'd within last 24h
+    if _is_market_in_cooldown(client, market_id):
+        logger.info(f"Trade blocked: market_cooldown (recent TRAILING_STOP or TAKE_PROFIT on this market)")
+        return None
+
+    # Check crypto price-target concentration limit
     if _is_price_target_market(market_question):
         crypto_open = _count_open_crypto_positions(client)
         if crypto_open >= MAX_CRYPTO_POSITIONS:
