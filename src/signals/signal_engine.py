@@ -26,7 +26,7 @@ from src.signals.contrarian_logic import (
     should_generate_signal,
 )
 from src.utils.logger import logger
-from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, MIN_ENTRY_PRICE, MIN_CONTRARIAN_PRICE, MIN_HOURS_TO_RESOLUTION, MAX_HOURS_TO_RESOLUTION
+from src.utils.config import SIGNAL_THRESHOLD, DIVERGENCE_THRESHOLD_MIN, SPORTS_QUESTION_KEYWORDS, PRICE_TARGET_KEYWORDS, MIN_ENTRY_PRICE, MIN_CONTRARIAN_PRICE, MIN_HOURS_TO_RESOLUTION, MAX_HOURS_TO_RESOLUTION
 
 _CANDIDATE_TOP_N = 500
 _MIN_VOLUME = 1_000
@@ -135,11 +135,13 @@ def _get_candidate_markets() -> list:
             break
         offset += 1000
 
-    # Filter sports markets already in DB (category field is unreliable from API, use keywords)
+    # Filter sports markets and crypto price-target markets
+    # (category field is unreliable from Gamma API, use keyword matching)
     before = len(all_markets)
     all_markets = [
         m for m in all_markets
         if not any(kw in (m.get("question") or "").lower() for kw in SPORTS_QUESTION_KEYWORDS)
+        and not any(kw in (m.get("question") or "").lower() for kw in PRICE_TARGET_KEYWORDS)
     ]
     filtered_sports = before - len(all_markets)
 
@@ -148,7 +150,7 @@ def _get_candidate_markets() -> list:
 
     logger.info(
         f"Candidate pool: {len(all_markets)} markets with vol>=${_MIN_VOLUME:,} "
-        f"(filtered {filtered_sports} sports)"
+        f"(filtered {filtered_sports} sports/price-target)"
     )
 
     # Bulk-fetch last 2h snapshots to compute recent velocity per market

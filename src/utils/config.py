@@ -42,6 +42,24 @@ SPORTS_QUESTION_KEYWORDS = [
     " sc win",     # sports club
 ]
 
+# Crypto price-target markets ("Will BTC reach $70k?", "Will ETH dip to $1,900?").
+# Shadow trade analysis shows 0% WR and -$64 P&L on these vs 66.7% WR +$34 on event markets.
+# The contrarian whale+velocity signal has no edge on speculative crypto price-range markets.
+PRICE_TARGET_KEYWORDS = [
+    "reach $",
+    "dip to $",
+    "hit $",
+    "fall to $",
+    "drop to $",
+    "above $",
+    "below $",
+    "be between $",
+    "price of bitcoin",
+    "price of ethereum",
+    "price of eth",
+    "price of btc",
+]
+
 # Precio minimo de entrada para evitar mercados sub-centavo con volatilidad absurda.
 # Un precio de 0.009 significa spread relativo del 10%+, destruye el edge.
 MIN_ENTRY_PRICE = 0.05
