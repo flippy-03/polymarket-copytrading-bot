@@ -340,11 +340,13 @@ def run_signal_engine() -> int:
                     divergence_score = round((herding["strength"] * 0.60 + vel_norm * 0.40) * 100, 2)
 
             # Fallback: velocity-only when no whale data has been collected yet.
-            # 5% in 1h is already unusual for event markets (politics, macro, tech).
+            # 3% in 1h is unusual for event markets (politics, macro, tech).
+            # Lowered from 5% to capture more signals; the LLM filter and
+            # SIGNAL_THRESHOLD still guard against low-quality entries.
             elif (
                 herding["sample_size"] == 0
                 and velocity["direction"]
-                and abs(velocity["velocity_1h"]) >= 0.05
+                and abs(velocity["velocity_1h"]) >= 0.03
             ):
                 divergence_detected = True
                 contrarian_direction = "NO" if velocity["direction"] == "UP" else "YES"

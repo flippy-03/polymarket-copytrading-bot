@@ -23,7 +23,9 @@ from src.trading.risk_manager import (
 from src.utils.config import TRAILING_STOP_PCT, TAKE_PROFIT_PCT
 from src.utils.logger import logger
 
-MAX_TRADE_DAYS = 7
+MAX_TRADE_DAYS = 3
+STALE_POSITION_HOURS = 48    # close lateralized positions after this many hours
+STALE_PNL_THRESHOLD = 0.10   # position is "lateral" if |pnl_pct| < this
 RESOLUTION_THRESHOLD = 0.97  # yes_price > 0.97 = resolved YES, < 0.03 = resolved NO
 STALE_SNAPSHOT_HOURS = 3     # fallback to Gamma API if snapshot is older than this
 
@@ -83,6 +85,32 @@ def _get_latest_price(client, market_id: str, direction: str) -> float | None:
         return None
     logger.info(f"Gamma API fallback price for {market_id[:8]}...: YES={yes_price:.3f}")
     return yes_price if direction == "YES" else round(1 - yes_price, 4)
+
+
+def _is_stale(trade: dict, current_price: float) -> bool:
+    """
+    A position is stale if it's been open >STALE_POSITION_HOURS and the P&L
+    is lateralized (between -STALE_PNL_THRESHOLD and +STALE_PNL_THRESHOLD).
+    These positions occupy a slot without any edge — better to free it.
+    """
+    opened_at = trade.get("opened_at", "")
+    if not opened_at:
+        return False
+    try:
+        dt = datetime.fromisoformat(opened_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        hours_open = (datetime.now(tz=timezone.utc) - dt).total_seconds() / 3600
+        if hours_open < STALE_POSITION_HOURS:
+            return False
+    except Exception:
+        return False
+
+    entry_price = float(trade["entry_price"])
+    if entry_price <= 0:
+        return False
+    pnl_pct = abs((current_price - entry_price) / entry_price)
+    return pnl_pct < STALE_PNL_THRESHOLD
 
 
 def _is_expired(trade: dict) -> bool:
@@ -157,17 +185,22 @@ def check_open_positions() -> int:
                 close_reason = "RESOLUTION"
                 current_price = exit_price
 
-        # 2-4. Only check if not already resolved
+        # 2-5. Only check if not already resolved
         if close_reason is None:
             # 2. Timeout
             if _is_expired(trade):
                 close_reason = "TIMEOUT"
 
-            # 3. Trailing stop
+            # 3. Stale position: open >48h with P&L between -10% and +10%
+            #    Not moving = no edge, just blocking a slot for better signals.
+            elif _is_stale(trade, current_price):
+                close_reason = "STALE"
+
+            # 4. Trailing stop
             elif current_price <= entry_price * (1 - TRAILING_STOP_PCT):
                 close_reason = "TRAILING_STOP"
 
-            # 4. Take profit
+            # 5. Take profit
             elif current_price >= entry_price * (1 + TAKE_PROFIT_PCT):
                 close_reason = "TAKE_PROFIT"
 

@@ -40,5 +40,7 @@ def calculate_momentum_score(velocity_1h: float, velocity_4h: float) -> dict:
         score = min(80.0, abs(velocity_1h) * 300)
         return {"score": round(score, 2), "pattern": "REVERSAL", "tradeable": True}
 
-    # Everything else: weak or unclear
-    return {"score": 20.0, "pattern": "WEAK_TREND", "tradeable": False}
+    # Weak but not zero: 1h move between 0.2% and 2%, not a clear trend.
+    # Tradeable with low score — the SIGNAL_THRESHOLD (65) will filter if
+    # divergence+smart_wallet aren't strong enough to compensate.
+    return {"score": 20.0, "pattern": "WEAK_TREND", "tradeable": True}

@@ -18,8 +18,15 @@ from src.utils.config import (
     PRICE_TARGET_KEYWORDS,
     MAX_CRYPTO_POSITIONS,
     MARKET_REENTRY_COOLDOWN_HOURS,
+    get_llm_enabled,
 )
 from src.utils.logger import logger
+from src.llm.market_validator import validate_trade_with_llm
+
+# Displacement: a signal with score >= this can close the worst open position
+DISPLACEMENT_MIN_SCORE = 80
+# Only displace positions with score below this AND negative P&L
+DISPLACEMENT_MAX_VICTIM_SCORE = 75
 
 # Reasons that reflect execution CAPACITY, not signal quality.
 # Shadow trades are only opened when blocked for these reasons.
@@ -91,6 +98,71 @@ def _get_current_price(market_id: str) -> float | None:
     return None
 
 
+def _try_displacement(client, signal: dict, state: dict) -> bool:
+    """
+    When all slots are full and the incoming signal has score >= DISPLACEMENT_MIN_SCORE,
+    close the worst open position (lowest score + negative P&L) to make room.
+    Returns True if a slot was freed.
+    """
+    signal_score = float(signal.get("total_score") or 0)
+    if signal_score < DISPLACEMENT_MIN_SCORE:
+        return False
+
+    open_trades = (
+        client.table("paper_trades")
+        .select("id,market_id,signal_id,direction,entry_price,shares,position_usd,opened_at")
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+    if not open_trades:
+        return False
+
+    # Enrich with signal scores and current P&L
+    candidates = []
+    for t in open_trades:
+        # Get signal score for this trade
+        sig = client.table("signals").select("total_score").eq("id", t["signal_id"]).limit(1).execute().data
+        t_score = float(sig[0]["total_score"]) if sig else 0
+
+        if t_score >= DISPLACEMENT_MAX_VICTIM_SCORE:
+            continue  # Don't displace good positions
+
+        # Get current price to check P&L
+        from src.trading.position_manager import _get_latest_price
+        current_price = _get_latest_price(client, t["market_id"], t["direction"])
+        if current_price is None:
+            continue
+
+        entry = float(t["entry_price"])
+        pnl_pct = (current_price - entry) / entry if entry > 0 else 0
+
+        if pnl_pct >= 0:
+            continue  # Only displace losing positions
+
+        candidates.append({
+            "trade": t,
+            "score": t_score,
+            "pnl_pct": pnl_pct,
+            "current_price": current_price,
+        })
+
+    if not candidates:
+        return False
+
+    # Pick the worst: lowest score first, then worst P&L
+    worst = min(candidates, key=lambda c: (c["score"], c["pnl_pct"]))
+
+    result = close_trade(worst["trade"], worst["current_price"], "DISPLACED")
+    if result:
+        logger.info(
+            f"DISPLACED trade score={worst['score']:.0f} pnl={worst['pnl_pct']:.1%} "
+            f"to make room for signal score={signal_score:.0f}"
+        )
+        return True
+    return False
+
+
 def open_trade(signal: dict) -> dict | None:
     """
     Open a paper trade from a signal.
@@ -104,8 +176,16 @@ def open_trade(signal: dict) -> dict | None:
 
     allowed, reason = is_trading_allowed(state)
     if not allowed:
-        logger.info(f"Trade blocked: {reason}")
-        return None
+        # Displacement: if blocked by max_open_positions, try closing worst position
+        if "max_open_positions" in reason:
+            displaced = _try_displacement(client, signal, state)
+            if displaced:
+                state = get_portfolio_state(client)  # refresh after displacement
+                allowed, reason = is_trading_allowed(state)
+
+        if not allowed:
+            logger.info(f"Trade blocked: {reason}")
+            return None
 
     market_id = signal["market_id"]
     direction = signal["direction"]  # YES | NO
@@ -124,6 +204,37 @@ def open_trade(signal: dict) -> dict | None:
         crypto_open = _count_open_crypto_positions(client)
         if crypto_open >= MAX_CRYPTO_POSITIONS:
             logger.info(f"Trade blocked: crypto_position_limit ({crypto_open}/{MAX_CRYPTO_POSITIONS} crypto open)")
+            return None
+
+    # LLM semantic validation — evaluates whether the bot's contrarian reasoning is sound
+    if get_llm_enabled():
+        market_end_date = ""
+        market_meta = client.table("markets").select("end_date,yes_price").eq("id", market_id).limit(1).execute().data
+        if market_meta:
+            market_end_date = market_meta[0].get("end_date", "") or ""
+            current_yes_for_llm = float(market_meta[0].get("yes_price") or signal["price_at_signal"])
+        else:
+            current_yes_for_llm = float(signal["price_at_signal"])
+        llm_valid, llm_reasoning = validate_trade_with_llm(
+            question=market_question,
+            resolution_date=market_end_date,
+            yes_price=current_yes_for_llm,
+            direction=direction,
+            total_score=float(signal.get("total_score") or 0),
+            divergence_score=float(signal.get("divergence_score") or 0),
+            momentum_score=float(signal.get("momentum_score") or 0),
+            momentum_pattern=str(signal.get("momentum_pattern") or "unknown"),
+            velocity_1h=float(signal.get("divergence_at_signal") or 0),
+        )
+        # Store LLM reasoning in the signal for analysis
+        try:
+            client.table("signals").update({
+                "llm_reasoning": llm_reasoning[:500],
+            }).eq("id", signal["id"]).execute()
+        except Exception:
+            pass  # Column may not exist yet — non-blocking
+        if not llm_valid:
+            logger.info(f"Trade blocked: llm_filter ({llm_reasoning})")
             return None
 
     # Use price at signal time — reflects what would have been traded in production

@@ -87,7 +87,7 @@ KELLY_FRACTION = 0.5
 
 # === RISK MANAGEMENT ===
 CIRCUIT_BREAKER_LOSSES = 3
-CIRCUIT_BREAKER_COOLDOWN_HOURS = 24
+CIRCUIT_BREAKER_COOLDOWN_HOURS = 12
 TRAILING_STOP_PCT = 0.25
 TAKE_PROFIT_PCT = 0.50
 MAX_DRAWDOWN_PCT = 0.20
@@ -99,7 +99,36 @@ SIGNAL_CHECK_INTERVAL_SECONDS = 300
 POSITION_CHECK_INTERVAL_SECONDS = 60
 
 # === SIGNAL WEIGHTS ===
-WEIGHT_DIVERGENCE = 0.50
-WEIGHT_MOMENTUM = 0.30
-WEIGHT_SMART_WALLET = 0.20
+# Smart wallet score is currently static (not per-market), so its weight is
+# reduced from 0.20 to 0.10. The freed weight goes to divergence (the core signal).
+WEIGHT_DIVERGENCE = 0.55
+WEIGHT_MOMENTUM = 0.35
+WEIGHT_SMART_WALLET = 0.10
 SIGNAL_THRESHOLD = 65
+
+# === LLM FILTER ===
+# Semantic validation of trades via Claude before execution.
+# Fail-open: any API failure allows the trade through.
+# Runtime toggle: dashboard writes llm_enabled to portfolio_state.metadata.
+# The env var is the default; the DB value (if present) overrides it.
+LLM_ENABLED_DEFAULT = os.environ.get("LLM_ENABLED", "true").lower() == "true"
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
+
+# Keep the old name for backward compat — modules that import LLM_ENABLED
+# at the top level get the env default. Runtime check uses get_llm_enabled().
+LLM_ENABLED = LLM_ENABLED_DEFAULT
+
+
+def get_llm_enabled() -> bool:
+    """Check LLM toggle from DB (portfolio_state.metadata), falling back to env var."""
+    try:
+        from src.db import supabase_client as _db
+        client = _db.get_client()
+        result = client.table("portfolio_state").select("metadata").order("run_id", desc=True).limit(1).execute()
+        if result.data and result.data[0].get("metadata"):
+            val = result.data[0]["metadata"].get("llm_enabled")
+            if val is not None:
+                return bool(val)
+    except Exception:
+        pass
+    return LLM_ENABLED_DEFAULT
