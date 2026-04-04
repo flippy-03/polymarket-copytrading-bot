@@ -111,7 +111,7 @@ SIGNAL_THRESHOLD = 65
 # Fail-open: any API failure allows the trade through.
 # Runtime toggle: dashboard writes llm_enabled to portfolio_state.metadata.
 # The env var is the default; the DB value (if present) overrides it.
-LLM_ENABLED_DEFAULT = os.environ.get("LLM_ENABLED", "true").lower() == "true"
+LLM_ENABLED_DEFAULT = os.environ.get("LLM_ENABLED", "false").lower() == "true"
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
 
 # Keep the old name for backward compat — modules that import LLM_ENABLED

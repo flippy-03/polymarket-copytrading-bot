@@ -10,20 +10,38 @@ import os
 
 import anthropic
 
-from src.utils.config import LLM_ENABLED, LLM_MODEL
+from src.utils.config import get_llm_enabled, LLM_MODEL
 from src.utils.logger import logger
 
-_client: anthropic.Anthropic | None = None
+
+def _get_api_key() -> str:
+    """Try DB metadata first (set via dashboard), fall back to env var."""
+    try:
+        from src.db import supabase_client as _db
+        client = _db.get_client()
+        result = client.table("portfolio_state").select("metadata").order("run_id", desc=True).limit(1).execute()
+        if result.data and result.data[0].get("metadata"):
+            key = result.data[0]["metadata"].get("llm_api_key", "")
+            if key:
+                return key
+    except Exception:
+        pass
+    return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
-        _client = anthropic.Anthropic(api_key=api_key)
-    return _client
+def _get_model() -> str:
+    """Try DB metadata first (set via dashboard), fall back to config default."""
+    try:
+        from src.db import supabase_client as _db
+        client = _db.get_client()
+        result = client.table("portfolio_state").select("metadata").order("run_id", desc=True).limit(1).execute()
+        if result.data and result.data[0].get("metadata"):
+            model = result.data[0]["metadata"].get("llm_model", "")
+            if model:
+                return model
+    except Exception:
+        pass
+    return LLM_MODEL
 
 
 _PROMPT_TEMPLATE = """\
@@ -85,8 +103,13 @@ def validate_trade_with_llm(
     On any failure (API error, timeout, parse error): returns (True, "llm_unavailable")
     so the trade proceeds normally — fail open.
     """
-    if not LLM_ENABLED:
+    if not get_llm_enabled():
         return True, "llm_disabled"
+
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("LLM enabled but ANTHROPIC_API_KEY not set — failing open")
+        return True, "llm_no_key"
 
     no_price = round(1 - yes_price, 4)
     prompt = _PROMPT_TEMPLATE.format(
@@ -103,9 +126,9 @@ def validate_trade_with_llm(
     )
 
     try:
-        client = _get_client()
+        client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model=LLM_MODEL,
+            model=_get_model(),
             max_tokens=128,
             timeout=8.0,
             messages=[{"role": "user", "content": prompt}],
