@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import KpiCard from "@/components/KpiCard";
 import TimeFilterBar from "@/components/TimeFilter";
@@ -29,33 +29,35 @@ export default function DashboardPage() {
   }, [timeFilter]);
   const { data: trades } = useAutoRefresh<any[]>(tradesFetcher);
 
-  // All-time trades for the equity curve (independent of time filter)
+  // Run 2+3 trades for the equity curve (exclude Run 1 which had different params)
   const allTradesFetcher = useCallback(() =>
     fetch("/api/trades?status=CLOSED&limit=500").then((r) => r.json()), []);
-  const { data: allTrades } = useAutoRefresh<any[]>(allTradesFetcher);
+  const { data: rawAllTrades } = useAutoRefresh<any[]>(allTradesFetcher);
+  const allTrades = (rawAllTrades ?? []).filter((t: any) => t.run_id === 2 || t.run_id === 3);
 
   const signalsFetcher = useCallback(() =>
     fetch("/api/signals?status=ACTIVE&limit=10").then((r) => r.json()), []);
   const { data: signals } = useAutoRefresh<any[]>(signalsFetcher);
 
-  // Build equity curve from ALL closed trades — last point matches portfolio.total_pnl
-  const equityCurve = (() => {
-    if (!allTrades?.length) return [];
+  // Build equity curve from Run 2+3 trades, with run boundary marker
+  const { equityCurve, run3StartDate } = (() => {
+    if (!allTrades?.length) return { equityCurve: [], run3StartDate: null };
     let cum = 0;
-    return allTrades
+    let run3StartDate: string | null = null;
+    const sorted = allTrades
       .slice()
       .sort((a: any, b: any) => {
         const da = new Date(a.closed_at ?? a.opened_at).getTime();
         const db = new Date(b.closed_at ?? b.opened_at).getTime();
         return da - db;
-      })
-      .map((t: any) => {
-        cum += t.pnl_usd ?? 0;
-        return {
-          date: (t.closed_at ?? t.opened_at)?.slice(5, 16).replace("T", " "),
-          pnl: Math.round(cum * 100) / 100,
-        };
       });
+    const curve = sorted.map((t: any) => {
+      cum += t.pnl_usd ?? 0;
+      const date = (t.closed_at ?? t.opened_at)?.slice(5, 16).replace("T", " ");
+      if (t.run_id === 3 && !run3StartDate) run3StartDate = date;
+      return { date, pnl: Math.round(cum * 100) / 100, run_id: t.run_id };
+    });
+    return { equityCurve: curve, run3StartDate };
   })();
 
   const totalUnrealized = (positions ?? []).reduce(
@@ -186,6 +188,10 @@ export default function DashboardPage() {
                 formatter={(value: any) => [`$${Number(value).toFixed(2)}`, "Cumulative P&L"]}
               />
               <Area type="monotone" dataKey="pnl" stroke="var(--blue)" fill="url(#pnlGrad)" strokeWidth={2} />
+              {run3StartDate && (
+                <ReferenceLine x={run3StartDate} stroke="var(--text-secondary)" strokeDasharray="4 4" strokeOpacity={0.4}
+                  label={{ value: "Run 3", position: "top", fontSize: 9, fill: "var(--text-secondary)", opacity: 0.6 }} />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -217,7 +223,7 @@ export default function DashboardPage() {
             <tbody>
               {(positions ?? []).map((p: any) => (
                 <tr key={p.id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                  <td className="px-5 py-2.5 max-w-64 truncate">{p.market_question}</td>
+                  <td className="px-5 py-2.5 max-w-64 truncate" title={p.market_question}>{p.market_question}</td>
                   <td className="text-center px-3 py-2.5">
                     <span className="px-2 py-0.5 rounded text-xs font-bold"
                       style={{
@@ -275,7 +281,7 @@ export default function DashboardPage() {
               <tbody>
                 {signals.map((s: any) => (
                   <tr key={s.id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                    <td className="px-5 py-2.5 max-w-64 truncate">{s.market_question}</td>
+                    <td className="px-5 py-2.5 max-w-64 truncate" title={s.market_question}>{s.market_question}</td>
                     <td className="text-center px-3 py-2.5">
                       <span className="px-2 py-0.5 rounded text-xs font-bold"
                         style={{
@@ -323,7 +329,7 @@ export default function DashboardPage() {
                   <td className="px-5 py-2.5 whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>
                     {(t.closed_at ?? t.opened_at)?.slice(5, 16).replace("T", " ")}
                   </td>
-                  <td className="px-3 py-2.5 max-w-48 truncate">{t.market_question}</td>
+                  <td className="px-3 py-2.5 max-w-48 truncate" title={t.market_question}>{t.market_question}</td>
                   <td className="text-center px-3 py-2.5">
                     <span className="px-2 py-0.5 rounded text-xs font-bold"
                       style={{

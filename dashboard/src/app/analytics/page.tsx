@@ -144,7 +144,9 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     if (!didAutoSelect && stats?.runs?.length > 0) {
-      setRunId(String(stats.runs[0].id));
+      // Default to Run 3 if it exists, otherwise most recent
+      const run3 = stats.runs.find((r: any) => r.id === 3);
+      setRunId(String(run3 ? run3.id : stats.runs[0].id));
       setDidAutoSelect(true);
     }
   }, [stats, didAutoSelect]);
