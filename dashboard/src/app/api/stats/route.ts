@@ -96,10 +96,11 @@ export async function GET(request: Request) {
     for (const m of mData ?? []) markets[m.id] = m.question;
   }
 
-  const { data: runs } = await supabase
-    .from("runs")
-    .select("id,started_at,note")
-    .order("id", { ascending: false });
+  const { data: runsRaw } = await supabase
+    .from("portfolio_state")
+    .select("run_id,updated_at")
+    .order("run_id", { ascending: false });
+  const runs = (runsRaw ?? []).map((r) => ({ id: r.run_id, started_at: r.updated_at, note: "" }));
 
   return NextResponse.json({
     totalTrades: closed.length,

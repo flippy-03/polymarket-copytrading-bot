@@ -1,0 +1,97 @@
+Edge Analysis — generated 2026-04-04 10:00
+
+============================================================
+A. OVERALL SUMMARY
+============================================================
+Total closed trades:  37
+Wins:                 17
+Losses:               20
+Win rate:             45.9%
+Total P&L:            $-49.20
+Avg win:              $21.42
+Avg loss:             $-20.66
+Win/Loss ratio:       1.04x
+
+============================================================
+B. WIN RATE BY total_score BUCKET
+============================================================
+  [65-70]  n=  4  WR=50%  P&L=$-3.04
+  [70-75]  n= 13  WR=31%  P&L=$-78.64
+  [75-80]  n=  9  WR=33%  P&L=$-93.33
+  [80+]  n= 11  WR=73%  P&L=$125.81
+
+  divergence_score correlation:
+  div[<50]  n=  0  WR=0%  P&L=$0.00
+  div[50-70]  n=  0  WR=0%  P&L=$0.00
+  div[70+]  n= 37  WR=46%  P&L=$-49.20
+
+  momentum_score correlation:
+  mom[<30]  n=  0  WR=0%  P&L=$0.00
+  mom[30-60]  n= 11  WR=27%  P&L=$-56.27
+  mom[60+]  n= 26  WR=54%  P&L=$7.07
+
+============================================================
+C. WIN RATE BY CLOSE REASON
+============================================================
+  INVALID_SIGNAL        n=  1  WR=100%  P&L=$3.56  avg_hold=20.7h
+  RESOLUTION            n= 12  WR=67%  P&L=$-8.81  avg_hold=25.5h
+  TAKE_PROFIT           n=  7  WR=100%  P&L=$186.60  avg_hold=3.2h
+  TIMEOUT               n=  1  WR=100%  P&L=$9.11  avg_hold=168.0h
+  TRAILING_STOP         n= 16  WR=0%  P&L=$-239.66  avg_hold=8.6h
+
+  TRAILING_STOP detail (all 16 are losses):
+    YES  entry=0.060  exit=0.033  P&L=$-22.50  
+    YES  entry=0.070  exit=0.050  P&L=$-12.74  
+    YES  entry=0.080  exit=0.060  P&L=$-11.29  
+    NO   entry=0.320  exit=0.240  P&L=$-12.67  
+    NO   entry=0.310  exit=0.230  P&L=$-12.29  
+    YES  entry=0.320  exit=0.240  P&L=$-13.33  
+    YES  entry=0.370  exit=0.260  P&L=$-13.98  
+    NO   entry=0.620  exit=0.460  P&L=$-12.42  
+    YES  entry=0.420  exit=0.310  P&L=$-14.70  
+    NO   entry=0.600  exit=0.400  P&L=$-17.39  
+    YES  entry=0.300  exit=0.200  P&L=$-16.52  
+    NO   entry=0.200  exit=0.130  P&L=$-15.16  
+    YES  entry=0.580  exit=0.420  P&L=$-13.94  
+    NO   entry=0.640  exit=0.300  P&L=$-28.26  
+    YES  entry=0.240  exit=0.180  P&L=$-11.40  
+    YES  entry=0.240  exit=0.180  P&L=$-11.07  
+
+============================================================
+D. WIN RATE BY DIRECTION (YES vs NO)
+============================================================
+  YES  n= 18  WR=22%  P&L=$-224.00  avg=$-12.44
+  NO   n= 19  WR=68%  P&L=$174.80  avg=$9.20
+
+============================================================
+E. CRYPTO PRICE-TARGET vs EVENT MARKETS
+============================================================
+  CRYPTO  n=  0  WR=0%  P&L=$0.00
+  EVENT   n= 37  WR=46%  P&L=$-49.20
+
+============================================================
+F. EXPIRED SIGNALS — WHAT DID WE MISS?
+============================================================
+  Total signals: 99
+  Executed: 41 (41%)
+  Expired:  58 (59%)
+
+  Avg score — executed: 77.1
+  Avg score — expired:  75.5
+
+  Expired by type:
+    crypto:  0
+    event:   58
+
+============================================================
+G. KEY OBSERVATIONS
+============================================================
+  [!] TRAILING_STOP = 100% losses. Our 25% trailing stop is too tight:
+      Signals that trigger TS likely have mean-reversion that overshoots.
+      Consider: wider stop (35-40%) or time-based exit instead.
+  [+] TAKE_PROFIT = 100% wins. Our 50% target is well-calibrated.
+      These are our best trades — signals where divergence resolved cleanly.
+  [+] NO trades outperform YES (68% vs 22%).
+      Our contrarian edge is stronger fading overbought markets (NO direction).
+  [i] Only 41% of signals get executed (capacity + drift filter).
+      Expired signals may represent missed opportunities.
