@@ -85,6 +85,26 @@ def job_seed_leaderboard():
     logger.info(f"Leaderboard seeded: {n} wallets")
 
 
+def job_cleanup_snapshots():
+    """Delete snapshots older than 5 days in batches to avoid timeout."""
+    logger.info("--- JOB: cleanup_snapshots ---")
+    client = db.get_client()
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    total_deleted = 0
+    for _ in range(200):  # safety cap: max 200 batches = 10M rows
+        try:
+            result = client.table("market_snapshots").delete().lt("snapshot_at", cutoff).limit(10000).execute()
+            deleted = len(result.data) if result.data else 0
+            total_deleted += deleted
+            if deleted == 0:
+                break
+        except Exception as e:
+            logger.warning(f"Cleanup batch failed: {e}")
+            break
+    logger.info(f"Snapshots cleanup done — {total_deleted} rows deleted (kept last 5 days)")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -110,6 +130,7 @@ def main():
     schedule.every(1).hours.do(job_scan_markets)
     schedule.every(24).hours.do(job_seed_leaderboard)
     schedule.every(12).hours.do(update_context)
+    schedule.every(24).hours.do(job_cleanup_snapshots)
 
     logger.info("Scheduler started. Press Ctrl+C to stop.")
     logger.info(f"  Snapshots:    every 2 min")
@@ -117,6 +138,7 @@ def main():
     logger.info(f"  Market scan:  every 1 hr")
     logger.info(f"  Leaderboard:  every 24 hr")
     logger.info(f"  CONTEXT.md:   every 12 hr")
+    logger.info(f"  DB cleanup:   every 24 hr (keep 5 days)")
 
     while _running:
         schedule.run_pending()
