@@ -86,18 +86,29 @@ def job_seed_leaderboard():
 
 
 def job_cleanup_snapshots():
-    """Delete snapshots older than 5 days in batches to avoid timeout."""
+    """Delete snapshots older than 5 days in small batches to avoid timeout."""
     logger.info("--- JOB: cleanup_snapshots ---")
     client = db.get_client()
     from datetime import datetime, timezone, timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
     total_deleted = 0
-    for _ in range(200):  # safety cap: max 200 batches = 10M rows
+    for _ in range(10000):  # safety cap
         try:
-            result = client.table("market_snapshots").delete().lt("snapshot_at", cutoff).limit(10000).execute()
-            deleted = len(result.data) if result.data else 0
-            total_deleted += deleted
-            if deleted == 0:
+            # Select IDs first, then delete — supabase-py doesn't support .limit() on delete
+            rows = (
+                client.table("market_snapshots")
+                .select("id")
+                .lt("snapshot_at", cutoff)
+                .limit(500)
+                .execute()
+                .data
+            )
+            if not rows:
+                break
+            ids = [r["id"] for r in rows]
+            client.table("market_snapshots").delete().in_("id", ids).execute()
+            total_deleted += len(ids)
+            if len(ids) < 500:
                 break
         except Exception as e:
             logger.warning(f"Cleanup batch failed: {e}")
