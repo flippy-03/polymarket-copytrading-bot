@@ -151,35 +151,39 @@ def _get_candidate_markets() -> list:
         f"(filtered {filtered_sports} sports)"
     )
 
-    # Bulk-fetch last 2h snapshots to compute recent velocity per market
-    cutoff_2h = (now - timedelta(hours=2)).isoformat()
-    snaps_raw: list[dict] = []
-    snap_offset = 0
-    while True:
-        batch = (
-            client.table("market_snapshots")
-            .select("market_id,snapshot_at,yes_price")
-            .gte("snapshot_at", cutoff_2h)
-            .order("snapshot_at", desc=False)
-            .range(snap_offset, snap_offset + 999)
-            .execute()
-            .data
-        )
-        snaps_raw.extend(batch)
-        if len(batch) < 1000:
-            break
-        snap_offset += 1000
-
-    # Compute |price_change_2h| per market
-    snaps_by_market: dict[str, list[float]] = defaultdict(list)
-    for s in snaps_raw:
-        if s.get("yes_price") is not None:
-            snaps_by_market[s["market_id"]].append(float(s["yes_price"]))
-
+    # Bulk-fetch last 2h snapshots to compute recent velocity per market.
+    # This query scans ALL recent snapshots (no market_id filter) — can timeout on large tables.
+    # If it fails, we fall back to scoring with velocity=0 (vol + proximity only).
     velocity_by_market: dict[str, float] = {}
-    for mid, prices in snaps_by_market.items():
-        if len(prices) >= 2 and prices[0] > 0:
-            velocity_by_market[mid] = abs(prices[-1] - prices[0]) / prices[0]
+    try:
+        cutoff_2h = (now - timedelta(hours=2)).isoformat()
+        snaps_raw: list[dict] = []
+        snap_offset = 0
+        while True:
+            batch = (
+                client.table("market_snapshots")
+                .select("market_id,snapshot_at,yes_price")
+                .gte("snapshot_at", cutoff_2h)
+                .order("snapshot_at", desc=False)
+                .range(snap_offset, snap_offset + 999)
+                .execute()
+                .data
+            )
+            snaps_raw.extend(batch)
+            if len(batch) < 1000:
+                break
+            snap_offset += 1000
+
+        snaps_by_market: dict[str, list[float]] = defaultdict(list)
+        for s in snaps_raw:
+            if s.get("yes_price") is not None:
+                snaps_by_market[s["market_id"]].append(float(s["yes_price"]))
+
+        for mid, prices in snaps_by_market.items():
+            if len(prices) >= 2 and prices[0] > 0:
+                velocity_by_market[mid] = abs(prices[-1] - prices[0]) / prices[0]
+    except Exception as e:
+        logger.warning(f"Velocity pre-fetch failed (non-fatal, scoring without velocity): {e}")
 
     # Normalisation denominators
     max_volume = max((float(m.get("volume_24h") or 0) for m in all_markets), default=1.0) or 1.0
