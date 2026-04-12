@@ -34,29 +34,37 @@ class PolymarketClient:
     def get_active_markets(
         self,
         min_volume: float = 10_000,
-        limit: int = 100,
-        offset: int = 0,
+        limit: int = 200,
     ) -> list[dict]:
         """
-        Fetch active markets from Gamma API filtered by volume.
-        Returns normalized list of market dicts.
+        Fetch active markets from Gamma API using dual-query pattern.
+
+        Two queries merged by conditionId:
+          1. order=startDate desc  — newest markets (TTL ~24h, epoch-style)
+          2. order=endDate asc     — soonest-expiring (near-resolution candidates)
+
+        Using `active=true` in Gamma API would filter out many near-expiry and
+        lower-profile markets. We use `closed=false` only to get the full set.
         """
-        try:
-            data = self._gamma_get(
-                "/markets",
-                params={
-                    "active": "true",
-                    "closed": "false",
-                    "volume_num_min": min_volume,
-                    "limit": limit,
-                    "offset": offset,
-                },
-            )
-            markets = data if isinstance(data, list) else data.get("markets", [])
-            return [self._normalize_market(m) for m in markets]
-        except Exception as e:
-            logger.error(f"get_active_markets failed: {e}")
-            return []
+        seen: dict[str, dict] = {}
+        queries = [
+            {"closed": "false", "order": "startDate", "ascending": "false",
+             "volume_num_min": min_volume, "limit": limit},
+            {"closed": "false", "order": "endDate",   "ascending": "true",
+             "volume_num_min": min_volume, "limit": limit},
+        ]
+        for params in queries:
+            try:
+                data = self._gamma_get("/markets", params=params)
+                markets = data if isinstance(data, list) else data.get("markets", [])
+                for m in markets:
+                    cid = m.get("conditionId")
+                    if cid and cid not in seen:
+                        seen[cid] = m
+            except Exception as e:
+                logger.error(f"get_active_markets query failed ({params['order']}): {e}")
+
+        return [self._normalize_market(m) for m in seen.values()]
 
     def _normalize_market(self, raw: dict) -> dict:
         """Flatten Gamma API market into our schema shape."""
@@ -80,7 +88,8 @@ class PolymarketClient:
             except (ValueError, TypeError):
                 return None
 
-        end_date = raw.get("endDateIso") or raw.get("endDate") or raw.get("end_date")
+        # Prefer endDate (full ISO with time+Z) over endDateIso (date-only, no timezone)
+        end_date = raw.get("endDate") or raw.get("end_date") or raw.get("endDateIso")
         if isinstance(end_date, (int, float)):
             end_date = datetime.fromtimestamp(end_date, tz=timezone.utc).isoformat()
 

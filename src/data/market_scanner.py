@@ -59,18 +59,9 @@ def scan_markets() -> list[dict]:
 
     try:
         logger.info("Scanning active markets...")
-        all_markets: list[dict] = []
 
-        # Fetch from Gamma API (paginated)
-        offset = 0
-        while True:
-            batch = pm.get_active_markets(min_volume=MIN_VOLUME_24H, limit=100, offset=offset)
-            if not batch:
-                break
-            all_markets.extend(batch)
-            if len(batch) < 100:
-                break
-            offset += 100
+        # Dual-query: newest (startDate desc) + soonest-expiring (endDate asc), merged by conditionId
+        all_markets: list[dict] = pm.get_active_markets(min_volume=MIN_VOLUME_24H)
 
         # Enrich with PolymarketScan data if Gamma returns little volume data
         if len(all_markets) < 20:
