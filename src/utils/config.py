@@ -12,11 +12,13 @@ POLYMARKETSCAN_API_URL = "https://gzydspfquuaudqeztorw.supabase.co/functions/v1/
 POLYMARKETSCAN_API_KEY = os.environ["POLYMARKETSCAN_API_KEY"]
 POLYMARKETSCAN_AGENT_API_URL = "https://gzydspfquuaudqeztorw.supabase.co/functions/v1/agent-api"
 
-# === FALCON / NARRATIVE API ===
-# Parameterized endpoint currently returns 400 (server-side pipeline error).
-# Implemented for future use — gracefully returns empty on failure.
-FALCON_API_URL = "https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized"
+# === FALCON / NARRATIVE MCP SERVER ===
+# MCP over SSE — connect to /sse, get session_id, POST to /messages/?session_id=...
+FALCON_MCP_BASE = "https://narrative.agent.heisenberg.so"
 FALCON_BEARER_TOKEN = os.environ.get("FALCON_BEARER_TOKEN", "")
+
+# Kept for backwards compat — no longer used
+FALCON_API_URL = "https://narrative.agent.heisenberg.so/api/v2/semantic/retrieve/parameterized"
 
 # === ESTRATEGIA ===
 DIVERGENCE_THRESHOLD_MIN = 0.10
