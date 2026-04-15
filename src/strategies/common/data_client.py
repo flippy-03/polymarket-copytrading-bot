@@ -104,8 +104,13 @@ class DataClient:
     # ── Market holders & trades ─────────────────────────
 
     def get_market_holders(self, condition_id: str, limit: int = 50) -> list[dict]:
-        params = {"conditionId": condition_id, "limit": limit}
-        return self._get("/holders", params) or []
+        # Data API uses "market" param; response is [{token, holders: [...]}, ...]
+        params = {"market": condition_id, "limit": limit}
+        tokens = self._get("/holders", params) or []
+        holders: list[dict] = []
+        for token_obj in tokens:
+            holders.extend(token_obj.get("holders") or [])
+        return holders
 
     def get_market_trades(self, condition_id: str, limit: int = 500) -> list[dict]:
         params = {"market": condition_id, "limit": limit}
