@@ -85,22 +85,21 @@ class BasketBuilder:
         target_markets = short_term if len(short_term) >= 5 else unique[:20]
         logger.info(f"  markets: {len(unique)} unique, {len(short_term)} <=7d, using {len(target_markets)}")
 
-        # ── Step 2: collect candidates ───────────────────────────────────────────
-        # Primary source: recently RESOLVED markets — these have completed trades
-        # with real win/loss outcomes, giving us wallets with proven track records.
-        # Secondary source: active markets — supplement if resolved pool is thin.
-        freq: Counter = Counter()
+        # ── Step 2: collect candidates from resolved markets ─────────────────────
+        # Strategy: from resolved markets, find wallets that were PROFITABLE
+        # (net USDC positive = SELL > BUY in that market). These are wallets that
+        # manually exited with gains — exactly the copy-worthy signal we need.
+        # Hold-to-resolution bots (BUY-only) are excluded naturally.
 
-        # 2a — resolved markets (preferred: completed PnL, proven traders)
+        # 2a — get resolved markets for this category
         resolved_markets: list[dict] = []
         for tag_id in tag_ids:
             try:
-                batch = self.gamma.get_resolved_markets(tag_id=tag_id, limit=30)
+                batch = self.gamma.get_resolved_markets(tag_id=tag_id, limit=40)
                 resolved_markets.extend(batch)
             except Exception as e:
                 logger.warning(f"  get_resolved_markets(tag_id={tag_id}) failed: {e}")
             time.sleep(0.2)
-        # deduplicate
         seen_resolved: set[str] = set()
         unique_resolved: list[dict] = []
         for m in resolved_markets:
@@ -110,49 +109,73 @@ class BasketBuilder:
                 unique_resolved.append(m)
         logger.info(f"  resolved markets found: {len(unique_resolved)}")
 
-        for mkt in unique_resolved[:25]:
+        # 2b — for each resolved market, find wallets with positive USDC flow
+        # profitable_markets[addr] = count of resolved markets where wallet netted > 0
+        profitable_markets: Counter = Counter()
+        market_appearances: Counter = Counter()
+
+        for mkt in unique_resolved[:30]:
             cid = mkt.get("conditionId")
             if not cid:
                 continue
             try:
-                trades = self.data.get_market_trades(cid, limit=300)
-                for t in trades:
+                mkt_trades = self.data.get_market_trades(cid, limit=300)
+                # Group by wallet and compute net USDC
+                wallet_net: dict[str, float] = defaultdict(float)
+                for t in mkt_trades:
                     addr = t.get("proxyWallet")
-                    if addr:
-                        freq[addr] += 1
+                    if not addr:
+                        continue
+                    market_appearances[addr] += 1
+                    try:
+                        usdc = float(t.get("usdcSize") or 0)
+                    except (TypeError, ValueError):
+                        usdc = 0.0
+                    if t.get("side") == "SELL":
+                        wallet_net[addr] += usdc
+                    else:
+                        wallet_net[addr] -= usdc
+                # Count profitable wallets in this market
+                for addr, net in wallet_net.items():
+                    if net > 0:
+                        profitable_markets[addr] += 1
             except Exception as e:
                 logger.warning(f"  resolved trades({cid[:12]}) failed: {e}")
             time.sleep(0.15)
 
-        resolved_candidate_count = len([a for a, c in freq.most_common(100) if c >= 1])
-        logger.info(f"  wallets from resolved markets: {resolved_candidate_count}")
+        # 2c — candidates ranked by number of profitable resolved markets
+        # Exclude market makers (appear in >20 markets) and one-offs (0 profitable markets)
+        all_profitable = [
+            addr for addr, wins in profitable_markets.most_common(200)
+            if wins >= 1 and market_appearances[addr] <= 20
+        ]
+        profitable_count = len(all_profitable)
+        logger.info(f"  profitable in ≥1 resolved market: {profitable_count}")
 
-        # 2b — active markets (supplement when resolved pool is thin)
-        if resolved_candidate_count < 20:
-            logger.info(f"  supplementing with active market traders (resolved pool thin)")
+        # 2d — supplement with active market traders if profitable pool is thin
+        if profitable_count < 15:
+            logger.info(f"  supplementing with active market traders (pool thin)")
+            active_freq: Counter = Counter()
             for mkt in target_markets[:15]:
                 cid = mkt.get("conditionId")
                 if not cid:
                     continue
                 try:
-                    trades = self.data.get_market_trades(cid, limit=200)
-                    for t in trades:
+                    mkt_trades = self.data.get_market_trades(cid, limit=200)
+                    for t in mkt_trades:
                         addr = t.get("proxyWallet")
                         if addr:
-                            freq[addr] += 1
+                            active_freq[addr] += 1
                 except Exception as e:
                     logger.warning(f"  active trades({cid[:12]}) failed: {e}")
                 time.sleep(0.15)
+            # Add addresses not already in profitable pool
+            existing = set(all_profitable)
+            supplement = [a for a, _ in active_freq.most_common(50) if a not in existing]
+            all_profitable.extend(supplement[:20])
 
-        # Selective traders: 2-15 market appearances.
-        # Lower bound: one-off gamblers excluded; upper bound: market makers excluded (20+).
-        candidates = [addr for addr, count in freq.most_common(150) if 2 <= count <= 15]
-        if len(candidates) < 10:
-            # Widen to ≥1 if pool is too thin
-            candidates = [addr for addr, count in freq.most_common(150) if count <= 15]
-            logger.info(f"  candidates (≥1 market, fallback): {len(candidates)}")
-        else:
-            logger.info(f"  candidates (2-15 market appearances): {len(candidates)}")
+        candidates = all_profitable
+        logger.info(f"  candidates for analysis: {len(candidates)}")
 
         # ── Step 3: analyze candidates ───────────────────
         analyzed: list[tuple[WalletMetrics, list[dict]]] = []
