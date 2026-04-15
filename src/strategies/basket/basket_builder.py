@@ -144,13 +144,15 @@ class BasketBuilder:
                     logger.warning(f"  active trades({cid[:12]}) failed: {e}")
                 time.sleep(0.15)
 
-        # Prefer wallets seen in ≥2 markets; fall back to ≥1 if pool is small
-        candidates = [addr for addr, count in freq.most_common(100) if count >= 2]
+        # Selective traders: 2-15 market appearances.
+        # Lower bound: one-off gamblers excluded; upper bound: market makers excluded (20+).
+        candidates = [addr for addr, count in freq.most_common(150) if 2 <= count <= 15]
         if len(candidates) < 10:
-            candidates = [addr for addr, count in freq.most_common(100) if count >= 1]
+            # Widen to ≥1 if pool is too thin
+            candidates = [addr for addr, count in freq.most_common(150) if count <= 15]
             logger.info(f"  candidates (≥1 market, fallback): {len(candidates)}")
         else:
-            logger.info(f"  candidates with ≥2 market presence: {len(candidates)}")
+            logger.info(f"  candidates (2-15 market appearances): {len(candidates)}")
 
         # ── Step 3: analyze candidates ───────────────────
         analyzed: list[tuple[WalletMetrics, list[dict]]] = []

@@ -15,8 +15,8 @@ def passes_tier1(m: WalletMetrics) -> tuple[bool, str]:
         return False, f"track_record={m.track_record_days}d < {C.MIN_TRACK_RECORD_DAYS}d"
     if m.avg_holding_period_hours > C.MAX_HOLDING_PERIOD_DAYS * 24:
         return False, f"holding={m.avg_holding_period_hours:.0f}h > {C.MAX_HOLDING_PERIOD_DAYS*24}h"
-    if C.REQUIRE_POSITIVE_PNL_30D and m.pnl_30d <= 0:
-        return False, f"pnl_30d=${m.pnl_30d:.2f} <= 0"
+    if C.REQUIRE_POSITIVE_PNL_30D and m.pnl_30d < C.PNL_30D_TOLERANCE:
+        return False, f"pnl_30d=${m.pnl_30d:.2f} < {C.PNL_30D_TOLERANCE}"
     if C.REQUIRE_NONNEGATIVE_PNL_7D and m.pnl_7d < 0:
         return False, f"pnl_7d=${m.pnl_7d:.2f} < 0"
     if m.trades_per_month < C.MIN_TRADES_PER_MONTH:

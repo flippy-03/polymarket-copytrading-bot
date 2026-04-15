@@ -26,10 +26,11 @@ SCALPER_INITIAL_CAPITAL = float(os.getenv("SCALPER_INITIAL_CAPITAL", "1000"))
 # ── Tier 1 filters (elimination) ─────────────────────────
 MIN_WIN_RATE = 0.55               # relaxed 0.60→0.55 for backtest
 MIN_TRADES_TOTAL = 50             # relaxed 100→50 for backtest
-MIN_TRACK_RECORD_DAYS = 60        # relaxed 120→60 for backtest
+MIN_TRACK_RECORD_DAYS = 30        # relaxed 120→60→30; many good traders active <2mo
 MAX_HOLDING_PERIOD_DAYS = 21      # relaxed 7→21; prediction markets resolve over weeks
 MIN_TRADES_PER_MONTH = 4          # relaxed 8→4 for backtest
 REQUIRE_POSITIVE_PNL_30D = True
+PNL_30D_TOLERANCE = -5.0          # allow up to $5 negative (rounding/dust trades)
 REQUIRE_NONNEGATIVE_PNL_7D = False  # relaxed: 7d window too noisy for volatile events
 
 # ── Tier 2 filters (edge quality) ────────────────────────
