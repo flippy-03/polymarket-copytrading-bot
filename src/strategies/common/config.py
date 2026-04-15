@@ -65,12 +65,15 @@ MAX_ENTRY_DRIFT = 0.10
 
 # ── Basket strategy ──────────────────────────────────────
 BASKET_MIN_WALLETS = 5
-BASKET_MAX_WALLETS = 10
+BASKET_MAX_WALLETS = 7              # top-N target per basket (spec 5-10)
 BASKET_CONSENSUS_THRESHOLD = 0.80
 BASKET_TIME_WINDOW_HOURS = 4
 BASKET_MAX_CAPITAL_PCT = 0.30
 BASKET_EXIT_CONSENSUS = 0.50
 BASKET_MONITOR_INTERVAL_SECONDS = 60
+# Discovery tuning
+BASKET_POOL_CANDIDATES = 80        # candidates to analyze per basket (was hardcoded 50)
+BASKET_MIN_CATEGORY_PNL_PCT = 0.35 # specialist filter: ≥35% of PnL from basket category
 
 # ── Scalper strategy ─────────────────────────────────────
 SCALPER_ACTIVE_WALLETS = 3
