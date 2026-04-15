@@ -68,30 +68,85 @@ class ScalperPoolBuilder:
             markets = []
         logger.info(f"  markets: {len(markets)}")
 
-        # ── Step 2: collect traders ──────────────────────
-        freq: Counter = Counter()
-        for mkt in markets[:20]:
+        # ── Step 2: collect traders from RESOLVED markets ─
+        # Same profitability-based approach as basket builder:
+        # find wallets that netted positive USDC (SELL > BUY) in ≥1 resolved market.
+        # This pre-screens for manual traders with real exit discipline.
+        resolved = []
+        try:
+            # cross-category: fetch resolved markets without tag filter
+            resolved = self.gamma.get_resolved_markets(limit=40)
+        except Exception as e:
+            logger.warning(f"  get_resolved_markets failed: {e}")
+        logger.info(f"  resolved markets for candidate discovery: {len(resolved)}")
+
+        profitable_markets: Counter = Counter()
+        market_appearances: Counter = Counter()
+        for mkt in resolved[:30]:
             cid = mkt.get("conditionId")
             if not cid:
                 continue
             try:
-                trades = self.data.get_market_trades(cid, limit=200)
-                for t in trades:
+                mkt_trades = self.data.get_market_trades(cid, limit=300)
+                wallet_net: dict[str, float] = defaultdict(float)
+                for t in mkt_trades:
                     addr = t.get("proxyWallet") or t.get("address")
-                    if addr:
-                        freq[addr] += 1
+                    if not addr:
+                        continue
+                    market_appearances[addr] += 1
+                    try:
+                        usdc = (
+                            float(t["usdcSize"])
+                            if "usdcSize" in t
+                            else float(t.get("size") or 0) * float(t.get("price") or 0.5)
+                        )
+                    except (TypeError, ValueError):
+                        usdc = 0.0
+                    if t.get("side") == "SELL":
+                        wallet_net[addr] += usdc
+                    else:
+                        wallet_net[addr] -= usdc
+                for addr, net in wallet_net.items():
+                    if net > 0:
+                        profitable_markets[addr] += 1
             except Exception as e:
-                logger.warning(f"  market_trades({cid[:12]}) failed: {e}")
+                logger.warning(f"  resolved_trades({cid[:12]}) failed: {e}")
             time.sleep(0.15)
-        candidates = [addr for addr, _ in freq.most_common(60)]
-        logger.info(f"  candidates: {len(candidates)}")
+
+        # Candidates: profitable in ≥1 resolved market, not market makers (≤20 markets)
+        candidates = [
+            addr for addr, wins in profitable_markets.most_common(150)
+            if wins >= 1 and market_appearances[addr] <= 20
+        ]
+
+        # Supplement with active markets if resolved pool is thin
+        if len(candidates) < 15:
+            logger.info("  supplementing with active market traders")
+            freq: Counter = Counter()
+            for mkt in markets[:20]:
+                cid = mkt.get("conditionId")
+                if not cid:
+                    continue
+                try:
+                    mkt_trades = self.data.get_market_trades(cid, limit=200)
+                    for t in mkt_trades:
+                        addr = t.get("proxyWallet") or t.get("address")
+                        if addr:
+                            freq[addr] += 1
+                except Exception as e:
+                    logger.warning(f"  market_trades({cid[:12]}) failed: {e}")
+                time.sleep(0.15)
+            existing = set(candidates)
+            candidates += [a for a, _ in freq.most_common(60) if a not in existing]
+
+        logger.info(f"  candidates (profitable in resolved markets): {len(candidates)}")
 
         # ── Step 3: analyze + scalper-specific filters ───
         analyzed: list[tuple[WalletMetrics, list[dict]]] = []
         four_months_ago = int(
             (datetime.datetime.utcnow() - datetime.timedelta(days=120)).timestamp()
         )
-        for addr in candidates[:40]:
+        for addr in candidates[:60]:
             try:
                 trades = self.data.get_all_wallet_trades(addr, start=four_months_ago)
                 if len(trades) < C.MIN_TRADES_TOTAL:
