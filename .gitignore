@@ -8,3 +8,5 @@ logs/
 .claude/
 *.db
 *.sqlite
+.next/
+*.tsbuildinfo

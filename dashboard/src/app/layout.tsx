@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import { StrategyProvider } from "@/lib/strategy-context";
 
 export const metadata: Metadata = {
-  title: "Polymarket Trading",
-  description: "Trading bot dashboard",
+  title: "Polymarket Copytrading",
+  description: "Basket Consensus + Scalper Rotator dashboard",
 };
 
 export default function RootLayout({
@@ -15,8 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="flex min-h-screen">
-        <Sidebar />
-        <main className="flex-1 ml-56 p-6 overflow-auto">{children}</main>
+        <StrategyProvider>
+          <Sidebar />
+          <main className="flex-1 ml-56 p-6 overflow-auto">{children}</main>
+        </StrategyProvider>
       </body>
     </html>
   );

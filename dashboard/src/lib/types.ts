@@ -1,5 +1,5 @@
 export interface PortfolioState {
-  id: number;
+  strategy: "BASKET" | "SCALPER";
   initial_capital: number;
   current_capital: number;
   total_pnl: number;
@@ -15,51 +15,49 @@ export interface PortfolioState {
   open_positions: number;
   max_open_positions: number;
   updated_at: string;
-  run_id: number;
 }
 
-export interface PaperTrade {
+export interface CopyTrade {
   id: string;
-  signal_id: string;
-  market_id: string;
+  strategy: "BASKET" | "SCALPER";
+  signal_id: string | null;
+  source_wallet: string | null;
+  market_polymarket_id: string;
+  market_question: string | null;
+  market_category: string | null;
   direction: "YES" | "NO";
+  outcome_token_id: string | null;
   entry_price: number;
   exit_price: number | null;
   shares: number;
   position_usd: number;
   pnl_usd: number | null;
   pnl_pct: number | null;
-  status: "OPEN" | "CLOSED";
+  status: "OPEN" | "CLOSED" | "CANCELLED";
   close_reason: string | null;
   opened_at: string;
   closed_at: string | null;
-  run_id: number;
-  market_question?: string;
+  is_paper: boolean;
+  metadata: Record<string, unknown> | null;
 }
 
-export interface Signal {
-  id: number;
-  market_id: string;
-  signal_type: string;
-  direction: "YES" | "NO";
-  confidence: number;
-  price_at_signal: number;
-  divergence_score: number;
-  momentum_score: number;
-  smart_wallet_score: number;
-  total_score: number;
-  status: string;
-  created_at: string;
-  expires_at: string;
-}
-
-export interface MarketInfo {
+export interface ConsensusSignal {
   id: string;
-  question: string;
-  yes_price: number;
-  no_price: number;
-  volume_24h: number;
-  end_date: string;
+  basket_id: string;
+  basket_category?: string | null;
+  market_polymarket_id: string;
+  market_question: string | null;
+  direction: "YES" | "NO";
+  outcome_token_id: string | null;
+  consensus_pct: number;
+  wallets_agreeing: number;
+  wallets_total: number;
+  window_start: string | null;
+  window_end: string | null;
+  price_at_signal: number | null;
+  status: "PENDING" | "EXECUTED" | "EXPIRED" | "REJECTED";
+  created_at: string;
+  executed_at: string | null;
 }
 
 export type TimeFilter = "today" | "1w" | "1m" | "3m" | "1y" | "all";

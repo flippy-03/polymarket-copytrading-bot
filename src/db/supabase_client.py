@@ -47,7 +47,7 @@ def update(table: str, match: dict, data: dict) -> list:
 def verify_connection() -> bool:
     try:
         client = get_client()
-        client.table("markets").select("id").limit(1).execute()
+        client.table("portfolio_state_ct").select("strategy").limit(1).execute()
         logger.info("Supabase connection verified")
         return True
     except Exception as e:

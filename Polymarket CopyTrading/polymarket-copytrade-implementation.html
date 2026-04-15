@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Copytrade — Guía de Implementación</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0b0d;--s:#12141a;--s2:#1a1d26;--b:#2a2d38;--b2:#3d4155;--t:#e4e6ed;--td:#8b8fa3;--tm:#5d6177;--g:#22d68a;--gd:rgba(34,214,138,.12);--o:#f59e0b;--od:rgba(245,158,11,.12);--p:#6366f1;--pd:rgba(99,102,241,.12);--r:#ef4444;--rd:rgba(239,68,68,.1);--cb:#0d0f14}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--t);line-height:1.7;font-size:15px}
+.c{max-width:960px;margin:0 auto;padding:3rem 2rem 6rem;position:relative;z-index:1}
+.hdr{border-bottom:1px solid var(--b);padding-bottom:2rem;margin-bottom:2.5rem}
+.tag{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--g);background:var(--gd);padding:3px 10px;border-radius:4px;margin-bottom:.75rem}
+h1{font-size:2rem;font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-bottom:.5rem}
+h1 span{color:var(--g)}
+.meta{font-size:12px;color:var(--td);font-family:'JetBrains Mono',monospace}
+h2{font-size:1.25rem;font-weight:700;letter-spacing:-.02em;margin:2.5rem 0 1rem;padding-bottom:.4rem;border-bottom:1px solid var(--b);display:flex;align-items:center;gap:.5rem}
+h2 .n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--g);background:var(--gd);padding:2px 7px;border-radius:3px;font-weight:600}
+h3{font-size:1rem;font-weight:600;margin:1.5rem 0 .6rem;color:var(--o)}
+h4{font-size:.85rem;font-weight:600;margin:1rem 0 .4rem;font-family:'JetBrains Mono',monospace}
+p{margin-bottom:.8rem;color:var(--td);font-size:14px}
+p strong{color:var(--t)}
+.card{background:var(--s);border:1px solid var(--b);border-radius:8px;padding:1.5rem;margin:1rem 0;position:relative;overflow:hidden}
+.card.green::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--g),var(--p))}
+.card.orange::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--o),var(--r))}
+.card.blue::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--p),#818cf8)}
+.card-label{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.3rem}
+.card.green .card-label{color:var(--g)}
+.card.orange .card-label{color:var(--o)}
+.card.blue .card-label{color:var(--p)}
+.card-title{font-size:1.15rem;font-weight:700;margin-bottom:.3rem}
+.card-desc{color:var(--td);font-size:13px;margin-bottom:1rem}
+table{width:100%;border-collapse:collapse;margin:.75rem 0 1.25rem;font-size:13px}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--b)}
+th{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--tm);background:var(--s);font-weight:600}
+td{color:var(--td)}td strong{color:var(--t);font-weight:500}
+pre{background:var(--cb);border:1px solid var(--b);border-radius:6px;padding:1rem 1.25rem;margin:.75rem 0 1.25rem;overflow-x:auto;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.75;color:var(--td);white-space:pre;tab-size:4}
+code{font-family:'JetBrains Mono',monospace;font-size:11.5px;background:var(--s2);padding:1px 5px;border-radius:3px;color:var(--g)}
+pre code{background:none;padding:0;color:inherit}
+.cm{color:var(--tm)}
+.kw{color:var(--g)}
+.st{color:var(--o)}
+.fn{color:var(--p)}
+ul,ol{padding-left:1.5rem;margin:.5rem 0 1rem;color:var(--td)}
+li{margin-bottom:.4rem;font-size:13px}li strong{color:var(--t)}
+.al{border-radius:6px;padding:.85rem 1rem;margin:1rem 0;font-size:12px;border-left:3px solid}
+.al-r{background:var(--rd);border-color:var(--r);color:#fca5a5}
+.al-w{background:var(--od);border-color:var(--o);color:#fcd34d}
+.al-i{background:var(--pd);border-color:var(--p);color:#a5b4fc}
+.al-g{background:var(--gd);border-color:var(--g);color:#86efac}
+.al b{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.25rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.6rem;margin:.75rem 0}
+.sp{background:var(--s2);border:1px solid var(--b);border-radius:5px;padding:.7rem .85rem}
+.sp-l{font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--tm);margin-bottom:.2rem}
+.sp-v{font-size:13px;font-weight:600}
+hr{border:none;border-top:1px solid var(--b);margin:2rem 0}
+.toc{background:var(--s);border:1px solid var(--b);border-radius:6px;padding:1.25rem 1.5rem;margin:1.25rem 0 2rem;columns:2;column-gap:2rem}
+.toc-t{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--tm);margin-bottom:.5rem;column-span:all}
+.toc ol{counter-reset:toc;padding:0;list-style:none}
+.toc li{counter-increment:toc;font-size:12px;padding:.2rem 0;color:var(--td);break-inside:avoid}
+.toc li::before{content:counter(toc,decimal-leading-zero)" ";font-family:'JetBrains Mono',monospace;color:var(--g);font-weight:600;font-size:10px;margin-right:.4rem}
+.sep{text-align:center;color:var(--tm);font-size:12px;font-family:'JetBrains Mono',monospace;margin:2rem 0;padding:1rem;border:1px dashed var(--b);border-radius:6px}
+@media(max-width:640px){.c{padding:1.5rem 1rem 4rem}h1{font-size:1.5rem}.toc{columns:1}}
+</style>
+</head>
+<body>
+<div class="c">
+
+<div class="hdr">
+<div class="tag">Kaizen Trading System — Implementation Guide</div>
+<h1>Polymarket Copytrade <span>Builder</span></h1>
+<div class="meta">Guía técnica para Claude Code &nbsp;|&nbsp; Módulos comunes + específicos &nbsp;|&nbsp; Python 3.9+</div>
+</div>
+
+<div class="toc">
+<div class="toc-t">Índice</div>
+<ol>
+<li>Arquitectura y separación de módulos</li>
+<li>Módulos comunes: config, gamma_client, data_client</li>
+<li>Módulo común: wallet_analyzer</li>
+<li>Módulo común: wallet_filter + bot_detector</li>
+<li>Estrategia 1: Basket Builder (los 3 baskets)</li>
+<li>Estrategia 1: Consensus Engine</li>
+<li>Estrategia 2: Scalper Pool Builder</li>
+<li>Estrategia 2: Rotation Engine</li>
+<li>Tabla de separación común vs específico</li>
+<li>Orden de implementación (sprints)</li>
+</ol>
+</div>
+
+<!-- SECTION 1 -->
+<h2><span class="n">01</span> Arquitectura y separación de módulos</h2>
+
+<pre><code>polymarket-copytrade/
+├── <span class="kw">common/</span>                          <span class="cm"># COMPARTIDO (ambas estrategias)</span>
+│   ├── config.py                    <span class="cm"># Constantes, umbrales, API URLs</span>
+│   ├── gamma_client.py              <span class="cm"># Gamma API → descubrimiento mercados</span>
+│   ├── data_client.py               <span class="cm"># Data API → trades, posiciones, holders</span>
+│   ├── wallet_analyzer.py           <span class="cm"># Cálculo de métricas de wallets</span>
+│   ├── wallet_filter.py             <span class="cm"># Pipeline Tier1→Tier3→Tier2→Bot</span>
+│   ├── bot_detector.py              <span class="cm"># Tests cross-wallet (delay, originalidad)</span>
+│   └── risk_manager.py              <span class="cm"># Circuit breakers, sizing</span>
+│
+├── <span class="kw">strategy_basket/</span>                 <span class="cm"># SOLO ESTRATEGIA 1</span>
+│   ├── basket_builder.py            <span class="cm"># Construcción de baskets temáticos</span>
+│   ├── consensus_engine.py          <span class="cm"># Motor de consenso 80%</span>
+│   └── basket_executor.py           <span class="cm"># Ejecución de señales</span>
+│
+├── <span class="kw">strategy_scalper/</span>                <span class="cm"># SOLO ESTRATEGIA 2</span>
+│   ├── pool_builder.py              <span class="cm"># Pool cross-category</span>
+│   ├── rotation_engine.py           <span class="cm"># Selección semanal por Sharpe</span>
+│   └── scalper_executor.py          <span class="cm"># Copia directa</span>
+│
+├── main.py
+└── .env</code></pre>
+
+<div class="al al-g"><b>Principio de diseño</b>Los módulos en <code>common/</code> son 100% reutilizables. La lógica de filtrado, análisis y detección de bots es idéntica para ambas estrategias. Solo difiere HOW se buscan los wallets y WHAT se hace con la señal resultante.</div>
+
+<!-- SECTION 2 -->
+<h2><span class="n">02</span> Módulos comunes: APIs</h2>
+
+<h3>Gamma API — Descubrimiento de mercados</h3>
+<p>La Gamma API (<code>gamma-api.polymarket.com</code>) es pública, sin autenticación. Es el punto de entrada para descubrir mercados y mapear categorías.</p>
+
+<div class="grid">
+<div class="sp"><div class="sp-l">Endpoint clave</div><div class="sp-v">GET /tags</div></div>
+<div class="sp"><div class="sp-l">Uso</div><div class="sp-v">Mapear categorías a tag_ids</div></div>
+<div class="sp"><div class="sp-l">Rate limit</div><div class="sp-v">~4000 req/10s</div></div>
+<div class="sp"><div class="sp-l">Auth</div><div class="sp-v">Ninguna</div></div>
+</div>
+
+<h4>Endpoints que usamos:</h4>
+<table>
+<thead><tr><th>Endpoint</th><th>Qué devuelve</th><th>Para qué</th></tr></thead>
+<tbody>
+<tr><td><code>GET /tags</code></td><td>Lista de tags (id, label, slug)</td><td>Descubrir tag_ids de crypto, politics, economics</td></tr>
+<tr><td><code>GET /events?tag_id=X&active=true</code></td><td>Eventos filtrados con markets hijos</td><td>Mercados de una categoría</td></tr>
+<tr><td><code>GET /markets?active=true&order=volume_24hr</code></td><td>Mercados ordenados por volumen</td><td>Top mercados cross-category</td></tr>
+<tr><td><code>GET /markets/slug/{slug}</code></td><td>Mercado específico</td><td>Lookup directo</td></tr>
+</tbody>
+</table>
+
+<h3>Data API — Trades, posiciones, holders</h3>
+<p>La Data API (<code>data-api.polymarket.com</code>) es pública para lectura. Es donde obtenemos el historial de trades de cada wallet.</p>
+
+<table>
+<thead><tr><th>Endpoint</th><th>Parámetros clave</th><th>Para qué</th></tr></thead>
+<tbody>
+<tr><td><code>GET /activity?user=0x...</code></td><td><strong>user</strong> (obligatorio), type=TRADE, start, end, limit (max 500), offset</td><td>Histórico de trades de un wallet. Paginado.</td></tr>
+<tr><td><code>GET /positions?user=0x...</code></td><td>user, sortBy (CURRENT/CASHPNL), limit</td><td>Posiciones abiertas con P&L</td></tr>
+<tr><td><code>GET /holders?conditionId=0x...</code></td><td>conditionId, limit</td><td>Top holders de un mercado. CLAVE para basket builder.</td></tr>
+<tr><td><code>GET /trades?market=0x...</code></td><td>market (conditionId), limit</td><td>Trades recientes en un mercado. Para scalper pool.</td></tr>
+</tbody>
+</table>
+
+<div class="al al-w"><b>Nota importante — Proxy Wallet</b>Los usuarios de Polymarket operan desde un proxy wallet (Gnosis Safe), NO desde su EOA/MetaMask. Cuando trackeas un wallet, debes usar la <strong>dirección proxy</strong> visible en su perfil de Polymarket. Si usas la EOA, verás 0 trades.</div>
+
+<!-- SECTION 3 -->
+<h2><span class="n">03</span> Módulo común: wallet_analyzer</h2>
+
+<p>El <code>wallet_analyzer</code> recibe trades crudos del Data API y calcula TODAS las métricas necesarias para los filtros. Ambas estrategias lo usan exactamente igual.</p>
+
+<h4>Métricas que calcula:</h4>
+<table>
+<thead><tr><th>Métrica</th><th>Cálculo</th><th>Usado por</th></tr></thead>
+<tbody>
+<tr><td><strong>win_rate</strong></td><td>Mercados con P&L neto positivo / total mercados</td><td>Tier 1</td></tr>
+<tr><td><strong>track_record_days</strong></td><td>Último trade - primer trade</td><td>Tier 1</td></tr>
+<tr><td><strong>avg_holding_period</strong></td><td>Media de (último SELL - primer BUY) por mercado</td><td>Tier 1</td></tr>
+<tr><td><strong>pnl_30d / pnl_7d</strong></td><td>Sum(SELL usdc) - Sum(BUY usdc) en ventana</td><td>Tier 1</td></tr>
+<tr><td><strong>trades_per_month</strong></td><td>total_trades / (track_record_days / 30)</td><td>Tier 1</td></tr>
+<tr><td><strong>profit_factor</strong></td><td>gross_profit / gross_loss</td><td>Tier 2</td></tr>
+<tr><td><strong>edge_vs_odds</strong></td><td>win_rate - avg(entry_price). Entry price = implied probability.</td><td>Tier 2</td></tr>
+<tr><td><strong>unique_categories</strong></td><td>Heurística por keywords en slugs/títulos</td><td>Tier 2</td></tr>
+<tr><td><strong>positive_weeks_pct</strong></td><td>Semanas con P&L >0 / total semanas</td><td>Tier 2</td></tr>
+<tr><td><strong>interval_cv</strong></td><td>std(intervalos) / mean(intervalos) entre trades</td><td>Bot Test 1</td></tr>
+<tr><td><strong>size_cv</strong></td><td>std(usdcSizes) / mean(usdcSizes)</td><td>Bot Test 2</td></tr>
+</tbody>
+</table>
+
+<div class="al al-i"><b>Edge vs Odds — El concepto clave</b>En Polymarket, el precio de compra ES la probabilidad implícita. Si compras YES a $0.65, el mercado dice que hay 65% de probabilidad. Si tu win rate en ese tipo de mercado es 72%, tu edge real es +7%. Buscamos wallets con edge ≥ +5% sostenido.</div>
+
+<!-- SECTION 4 -->
+<h2><span class="n">04</span> Módulo común: wallet_filter + bot_detector</h2>
+
+<h3>Pipeline de filtros (secuencial y eliminatorio)</h3>
+<pre><code><span class="fn">full_filter_pipeline</span>(metrics):
+    <span class="cm"># 1. Tier 1 — Si falla uno, DESCARTADO</span>
+    <span class="kw">if not</span> passes_tier1(m): <span class="kw">return</span> False
+
+    <span class="cm"># 2. Tier 3 — Alertas de descarte inmediato</span>
+    <span class="kw">if</span> check_tier3_alerts(m): <span class="kw">return</span> False
+
+    <span class="cm"># 3. Tier 2 — Debe pasar ≥4 de 6</span>
+    <span class="kw">if</span> count_tier2_passes(m) < 4: <span class="kw">return</span> False
+
+    <span class="cm"># 4. Bot detection — Debe pasar ≥4 de 5 tests</span>
+    <span class="kw">if not</span> passes_bot_tests(m): <span class="kw">return</span> False
+
+    <span class="kw">return</span> True</code></pre>
+
+<h3>Bot detector — Tests avanzados (cross-wallet)</h3>
+<p>Los tests 1 (interval CV), 2 (size CV) y 5 (frecuencia) se calculan en el analyzer con datos del propio wallet. Los tests 3 y 4 requieren comparar contra OTROS wallets:</p>
+
+<div class="card blue">
+<div class="card-label">Test 3 — Delay Correlation</div>
+<div class="card-title">¿Opera siempre N segundos después de otro wallet?</div>
+<div class="card-desc">Para cada mercado en común entre el target y un whale conocido, calcular el delay entre el trade del whale y el trade del target. Si los delays son consistentes (baja varianza, siempre 10-60s), el target es un copier del whale.</div>
+</div>
+
+<div class="card blue">
+<div class="card-label">Test 4 — Market Originality</div>
+<div class="card-title">¿Opera mercados que los whales no operan?</div>
+<div class="card-desc">Calcular qué % de los mercados del target NO aparecen en el pool de whales conocidos. Si es ≥15%, tiene "opinión propia" y probablemente es humano. Si es 0%, todo lo que hace es copiar.</div>
+</div>
+
+<!-- SECTION 5 -->
+<h2><span class="n">05</span> Estrategia 1: Basket Builder</h2>
+
+<h3>Los 3 baskets iniciales</h3>
+
+<div class="card green">
+<div class="card-label">Basket 1 — Más fácil de construir</div>
+<div class="card-title">Crypto Prices</div>
+<div class="card-desc">BTC/ETH/SOL price targets con resolución diaria/semanal. Mayor volumen del ecosistema, más wallets con historial largo. CUIDADO: muy dominado por bots — los filtros de §3 son críticos aquí.</div>
+<div class="grid">
+<div class="sp"><div class="sp-l">Keywords para tags</div><div class="sp-v">crypto, bitcoin, btc, eth, solana</div></div>
+<div class="sp"><div class="sp-l">Tipo de mercados</div><div class="sp-v">"BTC above $X by date"</div></div>
+<div class="sp"><div class="sp-l">Resolución típica</div><div class="sp-v">1-7 días</div></div>
+<div class="sp"><div class="sp-l">Dificultad de filtrado</div><div class="sp-v">Alta (muchos bots)</div></div>
+</div>
+</div>
+
+<div class="card green">
+<div class="card-label">Basket 2 — Mejor ratio señal/ruido</div>
+<div class="card-title">Economía / Fed</div>
+<div class="card-desc">Reuniones FOMC, CPI, datos macro. Resolución programada (las fechas de FOMC son públicas). Los traders humanos con edge son analistas macro — más fáciles de distinguir de bots.</div>
+<div class="grid">
+<div class="sp"><div class="sp-l">Keywords para tags</div><div class="sp-v">fed, rate, inflation, cpi, gdp</div></div>
+<div class="sp"><div class="sp-l">Tipo de mercados</div><div class="sp-v">"Fed rate cut/hold", "CPI above X"</div></div>
+<div class="sp"><div class="sp-l">Resolución típica</div><div class="sp-v">1-6 semanas (FOMC schedule)</div></div>
+<div class="sp"><div class="sp-l">Dificultad de filtrado</div><div class="sp-v">Media</div></div>
+</div>
+</div>
+
+<div class="card green">
+<div class="card-label">Basket 3 — Mayor edge en consenso</div>
+<div class="card-title">Política / Geopolítica</div>
+<div class="card-desc">Votos legislativos, executive orders, eventos geopolíticos. El consenso de wallets informados es especialmente valioso aquí porque refleja información privilegiada real (insiders políticos).</div>
+<div class="grid">
+<div class="sp"><div class="sp-l">Keywords para tags</div><div class="sp-v">election, president, congress, vote, tariff</div></div>
+<div class="sp"><div class="sp-l">Tipo de mercados</div><div class="sp-v">"Bill passes Senate", "Shutdown by X"</div></div>
+<div class="sp"><div class="sp-l">Resolución típica</div><div class="sp-v">1-14 días</div></div>
+<div class="sp"><div class="sp-l">Dificultad de filtrado</div><div class="sp-v">Baja (pocos bots)</div></div>
+</div>
+</div>
+
+<h3>Flujo del Basket Builder (6 pasos)</h3>
+<pre><code><span class="cm"># Paso 1: Descubrir tags de la categoría</span>
+tag_ids = gamma.<span class="fn">discover_category_tags</span>()[category]
+
+<span class="cm"># Paso 2: Obtener mercados activos con ≥$100K volumen</span>
+markets = gamma.<span class="fn">get_active_markets</span>(tag_id=tag_ids[0], min_volume_24h=100000)
+
+<span class="cm"># Paso 3: Obtener top holders de cada mercado</span>
+<span class="kw">for</span> mkt <span class="kw">in</span> markets[:15]:
+    holders = data.<span class="fn">get_market_holders</span>(mkt["conditionId"], limit=30)
+    <span class="cm"># Contar frecuencia: wallet que aparece en ≥2 mercados = candidato</span>
+
+<span class="cm"># Paso 4: Obtener trades de cada candidato (últimos 4 meses)</span>
+<span class="kw">for</span> addr <span class="kw">in</span> candidates[:30]:
+    trades = data.<span class="fn">get_all_wallet_trades</span>(addr, start=four_months_ago)
+    metrics = <span class="fn">analyze_wallet</span>(trades, addr)
+
+<span class="cm"># Paso 5: Aplicar pipeline completo de filtros</span>
+<span class="kw">for</span> metrics <span class="kw">in</span> analyzed:
+    ok, report = <span class="fn">full_filter_pipeline</span>(metrics)
+
+<span class="cm"># Paso 6: Ranking por score compuesto, seleccionar top 5-10</span>
+score = pf*0.30 + edge*0.25 + freq*0.20 + consistency*0.15 + human*0.10</code></pre>
+
+<!-- SECTION 6 -->
+<h2><span class="n">06</span> Estrategia 1: Consensus Engine</h2>
+
+<p>El motor de consenso monitorea las actividades de todos los wallets del basket y genera señales cuando ≥80% coinciden.</p>
+
+<pre><code><span class="cm"># Regla de consenso</span>
+<span class="kw">for</span> market <span class="kw">in</span> active_positions:
+    recent = filter(within_4_hours, positions[market])
+    outcome_votes = count_by_outcome(recent)
+
+    <span class="kw">for</span> outcome, voters <span class="kw">in</span> outcome_votes:
+        pct = len(voters) / total_basket_size
+
+        <span class="kw">if</span> pct >= <span class="st">0.80</span>:  <span class="cm"># ← THRESHOLD</span>
+            signal = ConsensusSignal(
+                outcome=outcome,
+                consensus_pct=pct,
+                avg_entry_price=mean(prices),
+                wallets_in=voters,
+            )
+            <span class="cm"># → Validar liquidez → Ejecutar</span></code></pre>
+
+<h4>Reglas de salida del Basket:</h4>
+<ul>
+<li><strong>≥50% del basket cierra</strong> → cerrar posición</li>
+<li><strong>Take profit a 2x return</strong></li>
+<li><strong>Stop loss al 85% de entrada</strong></li>
+<li><strong>Timeout 7 días</strong> → cerrar a mercado</li>
+</ul>
+
+<!-- SECTION 7 -->
+<h2><span class="n">07</span> Estrategia 2: Scalper Pool Builder</h2>
+
+<p>El pool builder busca los mejores traders <strong>cross-category</strong> con filtros más agresivos que el basket.</p>
+
+<h4>Diferencias con basket_builder:</h4>
+<table>
+<thead><tr><th>Criterio</th><th>Basket Builder</th><th>Scalper Pool</th></tr></thead>
+<tbody>
+<tr><td>Agrupación</td><td>Por categoría temática</td><td><strong>Cross-category</strong></td></tr>
+<tr><td>Holding max</td><td>7 días</td><td><strong>5 días</strong></td></tr>
+<tr><td>Frecuencia min</td><td>8/mes</td><td><strong>12/mes</strong></td></tr>
+<tr><td>Fuente de wallets</td><td>Top holders por categoría</td><td><strong>Traders activos en top mercados por volumen</strong></td></tr>
+<tr><td>Ranking</td><td>Score compuesto</td><td><strong>Sharpe ratio 14d</strong></td></tr>
+<tr><td>Output</td><td>5-10 wallets por basket</td><td><strong>Pool de 8-12, solo 2-3 activos</strong></td></tr>
+</tbody>
+</table>
+
+<pre><code><span class="cm"># Flujo del Pool Builder</span>
+
+<span class="cm"># 1. Top 20 mercados por volumen (sin filtro de categoría)</span>
+markets = gamma.<span class="fn">get_active_markets</span>(limit=100, min_volume_24h=100000)
+
+<span class="cm"># 2. Obtener traders activos (via /trades, no /holders)</span>
+<span class="kw">for</span> mkt <span class="kw">in</span> markets[:20]:
+    trades = data.<span class="fn">get_market_trades</span>(mkt["conditionId"], limit=200)
+    <span class="cm"># Contar frecuencia de cada wallet</span>
+
+<span class="cm"># 3. Filtros Scalper específicos (antes del pipeline estándar)</span>
+<span class="kw">if</span> metrics.avg_holding_period > 5 * 24:  <span class="cm"># 5 días max</span>
+    <span class="kw">continue</span>
+<span class="kw">if</span> metrics.trades_per_month < 12:         <span class="cm"># 12/mes min</span>
+    <span class="kw">continue</span>
+
+<span class="cm"># 4. Pipeline estándar (Tier1 → Tier3 → Tier2 → Bot)</span>
+ok, report = <span class="fn">full_filter_pipeline</span>(metrics)
+
+<span class="cm"># 5. Ranking por Sharpe 14d estimado</span>
+sharpe = <span class="fn">estimate_sharpe</span>(metrics, trades)  <span class="cm"># mean(daily_pnl)/std * √365</span></code></pre>
+
+<!-- SECTION 8 -->
+<h2><span class="n">08</span> Estrategia 2: Rotation Engine</h2>
+
+<p>Cada lunes 00:00 UTC, el rotation engine re-evalúa el pool y selecciona los 2-3 titulares con mejor Sharpe.</p>
+
+<pre><code><span class="cm"># Rotación semanal</span>
+<span class="fn">execute_rotation</span>():
+    <span class="cm"># 1. Limpiar cuarentenas expiradas</span>
+    <span class="cm"># 2. Expulsar titulares con P&L negativo 7d + 14d</span>
+    <span class="cm"># 3. Ranking del pool elegible por Sharpe 14d</span>
+    <span class="cm"># 4. Seleccionar top 2-3</span>
+    <span class="cm"># 5. Asignar capital equitativamente</span>
+
+<span class="cm"># Cuarentena automática</span>
+<span class="fn">register_loss</span>(wallet, loss_pct):
+    <span class="kw">if</span> loss_pct < -0.10:
+        consecutive_losses[wallet] += 1
+    <span class="kw">if</span> consecutive_losses >= 3:
+        <span class="fn">quarantine_wallet</span>(wallet, days=14)</code></pre>
+
+<h4>Reglas de copia directa:</h4>
+<ul>
+<li>Copiar cada BUY del titular</li>
+<li>Sizing: <code>min(wallet_size * 0.05-0.10, $100, equity * 0.08)</code></li>
+<li>Si precio ha movido >5% desde ejecución fuente → SKIP</li>
+<li>Seguir SELLs del titular para salidas</li>
+<li>Stop loss global a -15%</li>
+<li>Timeout 7 días</li>
+</ul>
+
+<!-- SECTION 9 -->
+<h2><span class="n">09</span> Separación común vs específico</h2>
+
+<table>
+<thead><tr><th>Módulo</th><th>Basket</th><th>Scalper</th><th>Compartido</th></tr></thead>
+<tbody>
+<tr><td><code>config.py</code></td><td>—</td><td>—</td><td><strong>✅</strong></td></tr>
+<tr><td><code>gamma_client.py</code></td><td>usa tags</td><td>usa top mkts</td><td><strong>✅</strong></td></tr>
+<tr><td><code>data_client.py</code></td><td>holders</td><td>trades</td><td><strong>✅</strong></td></tr>
+<tr><td><code>wallet_analyzer.py</code></td><td>✅</td><td>✅</td><td><strong>✅</strong></td></tr>
+<tr><td><code>wallet_filter.py</code></td><td>✅</td><td>✅</td><td><strong>✅</strong></td></tr>
+<tr><td><code>bot_detector.py</code></td><td>✅</td><td>✅</td><td><strong>✅</strong></td></tr>
+<tr><td><code>basket_builder.py</code></td><td><strong>✅</strong></td><td>—</td><td>—</td></tr>
+<tr><td><code>consensus_engine.py</code></td><td><strong>✅</strong></td><td>—</td><td>—</td></tr>
+<tr><td><code>pool_builder.py</code></td><td>—</td><td><strong>✅</strong></td><td>—</td></tr>
+<tr><td><code>rotation_engine.py</code></td><td>—</td><td><strong>✅</strong></td><td>—</td></tr>
+</tbody>
+</table>
+
+<!-- SECTION 10 -->
+<h2><span class="n">10</span> Orden de implementación</h2>
+
+<div class="card orange">
+<div class="card-label">Sprint 1 — Semana 1</div>
+<div class="card-title">Data pipeline + filtros</div>
+<div class="card-desc">config → gamma_client → data_client → wallet_analyzer → wallet_filter.<br>Test: ejecutar basket_builder.build_all_baskets() y verificar que filtra correctamente.</div>
+</div>
+
+<div class="card orange">
+<div class="card-label">Sprint 2 — Semana 2</div>
+<div class="card-title">Elegir UNA estrategia para MVP</div>
+<div class="card-desc">Recomendación: empezar con Basket (más seguro para capital pequeño).<br>Implementar basket_builder + consensus_engine. Validar señales sin ejecutar (paper trading).</div>
+</div>
+
+<div class="card orange">
+<div class="card-label">Sprint 3 — Semana 3</div>
+<div class="card-title">Risk engine + ejecución real</div>
+<div class="card-desc">risk_manager (circuit breakers). Conectar CLOB API. Primeros trades reales con $1-5.<br>⚠️ No hay testnet. Toda la ejecución es producción.</div>
+</div>
+
+<div class="card orange">
+<div class="card-label">Sprint 4 — Semana 4</div>
+<div class="card-title">Segunda estrategia + monitoring</div>
+<div class="card-desc">Implementar pool_builder + rotation_engine (Scalper).<br>Alertas Telegram/Discord. PnL tracking. Dashboard de métricas.</div>
+</div>
+
+<hr>
+<p style="text-align:center;color:var(--tm);font-size:11px;font-family:'JetBrains Mono',monospace;margin-top:2rem">
+Kaizen Trading System — Implementation Guide v1.0 — Abril 2026
+</p>
+
+</div>
+</body>
+</html>
