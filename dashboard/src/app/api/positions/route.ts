@@ -9,6 +9,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const POSITION_COLUMNS =
+  "id,strategy,run_id,source_wallet,market_polymarket_id,market_question," +
+  "direction,outcome_token_id,entry_price,position_usd,opened_at,is_shadow";
+
 export async function GET(request: Request) {
   const strategy = resolveStrategy(request);
   const shadowMode = resolveShadowMode(request);
@@ -16,7 +20,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("copy_trades")
-    .select("*")
+    .select(POSITION_COLUMNS)
     .eq("status", "OPEN")
     .eq("strategy", strategy)
     .order("opened_at", { ascending: false });
@@ -29,7 +33,9 @@ export async function GET(request: Request) {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const enriched = (data ?? []).map((t) => {
+  // Cast: interpolated column-list select defeats supabase-js row-type inference.
+  const rows = ((data ?? []) as unknown) as Array<Record<string, unknown>>;
+  const enriched = rows.map((t) => {
     const entry = Number(t.entry_price ?? 0);
     return {
       ...t,

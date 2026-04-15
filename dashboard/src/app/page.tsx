@@ -59,10 +59,16 @@ export default function DashboardPage() {
   const { data: trades } = useAutoRefresh<Record<string, unknown>[]>(tradesFetcher);
 
   const allTradesFetcher = useCallback(
-    () => fetch(`/api/trades?${ctx}&status=CLOSED&limit=500`).then((r) => r.json()),
+    // Equity curve only uses pnl_usd + close/open timestamps. limit=100 keeps
+    // payload under ~20 KB; the underlying endpoint caps at 200 anyway.
+    () => fetch(`/api/trades?${ctx}&status=CLOSED&limit=100`).then((r) => r.json()),
     [ctx],
   );
-  const { data: rawAllTrades } = useAutoRefresh<Record<string, unknown>[]>(allTradesFetcher);
+  // Equity curve updates much less often than portfolio — poll every 5 min.
+  const { data: rawAllTrades } = useAutoRefresh<Record<string, unknown>[]>(
+    allTradesFetcher,
+    300000,
+  );
 
   const equityCurve = (() => {
     const list = rawAllTrades ?? [];
@@ -85,8 +91,13 @@ export default function DashboardPage() {
     });
   })();
 
+  // Signals only exist for the BASKET strategy — skip the fetch entirely
+  // for SCALPER to save ~120 requests/hour per tab.
   const signalsFetcher = useCallback(
-    () => fetch(`/api/signals?strategy=${strategy}&limit=10`).then((r) => r.json()),
+    () =>
+      strategy === "BASKET"
+        ? fetch(`/api/signals?strategy=${strategy}&limit=10`).then((r) => r.json())
+        : Promise.resolve([] as Record<string, unknown>[]),
     [strategy],
   );
   const { data: signals } = useAutoRefresh<Record<string, unknown>[]>(signalsFetcher);

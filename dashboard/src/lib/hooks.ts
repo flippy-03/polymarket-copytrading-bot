@@ -1,18 +1,29 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
+/**
+ * Poll `fetcher` every `intervalMs` — but pause while the browser tab is
+ * hidden (Page Visibility API). Resumes with an immediate fetch when the tab
+ * becomes visible again.
+ *
+ * Defaults raised to 60 s to cut Supabase egress in half vs. the previous 30 s.
+ * Pages that need fresher data (the dashboard home portfolio, positions, etc.)
+ * can still override per call.
+ */
 export function useAutoRefresh<T>(
   fetcher: () => Promise<T>,
-  intervalMs: number = 30000
+  intervalMs: number = 60000,
 ) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
 
   const refresh = useCallback(async () => {
     try {
-      const result = await fetcher();
+      const result = await fetcherRef.current();
       setData(result);
       setLastUpdated(new Date());
     } catch (err) {
@@ -20,12 +31,46 @@ export function useAutoRefresh<T>(
     } finally {
       setLoading(false);
     }
-  }, [fetcher]);
+  }, []);
 
   useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (id !== null) return;
+      id = setInterval(refresh, intervalMs);
+    };
+    const stop = () => {
+      if (id === null) return;
+      clearInterval(id);
+      id = null;
+    };
+
+    const onVisibilityChange = () => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) {
+        stop();
+      } else {
+        // Tab came back — fetch once immediately, then resume polling.
+        refresh();
+        start();
+      }
+    };
+
     refresh();
-    const id = setInterval(refresh, intervalMs);
-    return () => clearInterval(id);
+    if (typeof document !== "undefined" && !document.hidden) {
+      start();
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
+    return () => {
+      stop();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
   }, [refresh, intervalMs]);
 
   return { data, loading, lastUpdated, refresh };
