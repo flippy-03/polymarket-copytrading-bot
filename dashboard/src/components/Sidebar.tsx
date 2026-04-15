@@ -244,18 +244,25 @@ function BotStatusIndicator() {
           return;
         }
 
+        // Mirror risk_manager_ct.is_circuit_broken() + page.tsx logic:
+        // - requires_manual_review pins the CB on regardless of the timer
+        // - otherwise the timer must be in the future
         const cbActive =
           p.is_circuit_broken &&
-          p.circuit_broken_until &&
-          new Date(p.circuit_broken_until) > new Date();
+          (p.requires_manual_review ||
+            (p.circuit_broken_until && new Date(p.circuit_broken_until) > new Date()));
 
-        const initial = Number(p.initial_capital ?? 0);
+        // ATH-based drawdown (matches risk_manager_ct.current_drawdown()).
         const current = Number(p.current_capital ?? 0);
-        const currentDrawdown = initial > 0 ? (initial - current) / initial : 0;
+        const peak = Number(p.peak_capital ?? p.initial_capital ?? 0);
+        const currentDrawdown = peak > 0 ? Math.max(0, (peak - current) / peak) : 0;
 
         if (cbActive) {
-          setStatus({ running: false, reason: "Circuit Breaker" });
-        } else if (currentDrawdown >= 0.2) {
+          const reason = p.requires_manual_review && !p.circuit_broken_until
+            ? "Manual stop"
+            : "CB cooldown";
+          setStatus({ running: false, reason });
+        } else if (currentDrawdown >= 0.30) {
           setStatus({ running: false, reason: `DD ${(currentDrawdown * 100).toFixed(1)}%` });
         } else {
           setStatus({ running: true, reason: "ok" });
