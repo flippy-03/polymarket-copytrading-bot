@@ -199,6 +199,7 @@ def close_paper_trade(trade_id: str, reason: str) -> None:
         t["strategy"], pnl_usd, is_win=pnl_usd > 0, run_id=t["run_id"], is_shadow=False,
     )
     _decrement_open_positions(t["strategy"], t["run_id"], False)
+    risk.update_peak_capital(t["strategy"], run_id=t["run_id"])
     risk.register_loss_and_maybe_break(t["strategy"], pnl_pct, run_id=t["run_id"])
     logger.info(f"[{t['strategy']}] CLOSE {trade_id[:8]} @ {exit_price:.3f} PnL=${pnl_usd:.2f} ({pnl_pct:+.1%}) — {reason}")
 

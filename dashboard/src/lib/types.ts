@@ -2,6 +2,7 @@ export interface PortfolioState {
   strategy: "BASKET" | "SCALPER";
   initial_capital: number;
   current_capital: number;
+  peak_capital: number | null;
   total_pnl: number;
   total_pnl_pct: number;
   total_trades: number;
@@ -12,6 +13,7 @@ export interface PortfolioState {
   consecutive_losses: number;
   is_circuit_broken: boolean;
   circuit_broken_until: string | null;
+  requires_manual_review: boolean;
   open_positions: number;
   max_open_positions: number;
   updated_at: string;

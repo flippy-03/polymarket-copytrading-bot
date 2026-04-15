@@ -6,6 +6,7 @@ The engine keeps an in-memory rolling state of each wallet's latest position per
 conditionId. `ingest_trade()` is driven by the monitor (polling get_wallet_activity);
 `evaluate_consensus()` scans the state and emits ConsensusSignal rows.
 """
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -81,9 +82,12 @@ class ConsensusEngine:
                     outcome_votes[pos["outcome"]].append(w)
 
             for outcome, voters in outcome_votes.items():
-                pct = len(voters) / basket_size
-                if pct < C.BASKET_CONSENSUS_THRESHOLD:
+                # Use integer comparison to avoid floating-point edge cases.
+                # e.g. basket_size=7, threshold=0.80 → ceil(5.6) = 6 voters needed.
+                min_voters = math.ceil(basket_size * C.BASKET_CONSENSUS_THRESHOLD)
+                if len(voters) < min_voters:
                     continue
+                pct = len(voters) / basket_size
 
                 key = (cid, outcome)
                 last_emit = self._emitted.get(key, 0)

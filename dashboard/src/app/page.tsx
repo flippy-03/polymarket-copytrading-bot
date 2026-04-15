@@ -1,5 +1,8 @@
 "use client";
 
+// Mirrors src/strategies/common/config.py MAX_DRAWDOWN_PCT
+const C_MAX_DRAWDOWN_PCT = 0.30;
+
 import { useCallback, useState } from "react";
 import {
   Area,
@@ -26,6 +29,7 @@ import type { PortfolioState, TimeFilter } from "@/lib/types";
 export default function DashboardPage() {
   const { strategy, runId, shadowMode } = useStrategy();
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("1w");
+  const [toggling, setToggling] = useState(false);
   const ctx = ctxQueryString(strategy, runId, shadowMode);
 
   const portfolioFetcher = useCallback(
@@ -35,7 +39,8 @@ export default function DashboardPage() {
         .then((p) => (p && p.both ? p.real ?? p.shadow : p)),
     [ctx],
   );
-  const { data: portfolio } = useAutoRefresh<PortfolioState>(portfolioFetcher);
+  const { data: portfolio, refresh: refreshPortfolio } =
+    useAutoRefresh<PortfolioState>(portfolioFetcher);
 
   const positionsFetcher = useCallback(
     () => fetch(`/api/positions?${ctx}`).then((r) => r.json()),
@@ -93,53 +98,108 @@ export default function DashboardPage() {
 
   const initial = Number(portfolio?.initial_capital ?? 0);
   const current = Number(portfolio?.current_capital ?? 0);
-  const currentDrawdown = initial > 0 ? (initial - current) / initial : 0;
+  // ATH-based drawdown: use peak_capital (high-water mark) instead of initial_capital.
+  const peak = Number(portfolio?.peak_capital ?? portfolio?.initial_capital ?? 0);
+  const currentDrawdown = peak > 0 ? Math.max(0, (peak - current) / peak) : 0;
 
   const isCircuitBroken =
     portfolio?.is_circuit_broken &&
-    portfolio.circuit_broken_until &&
-    new Date(portfolio.circuit_broken_until) > new Date();
+    (portfolio.requires_manual_review ||
+      (portfolio.circuit_broken_until &&
+        new Date(portfolio.circuit_broken_until) > new Date()));
 
-  const isDrawdownBreached = currentDrawdown >= 0.2;
+  const isManualStop =
+    portfolio?.is_circuit_broken && portfolio?.requires_manual_review;
+
+  // Auto-tripped = CB active AND has a future timer (set by consecutive-loss logic).
+  // Manual stop = CB active with requires_manual_review but no future timer.
+  const isAutoTripped =
+    isCircuitBroken &&
+    !!(portfolio?.circuit_broken_until) &&
+    new Date(portfolio!.circuit_broken_until!) > new Date();
+
+  const isDrawdownBreached = currentDrawdown >= C_MAX_DRAWDOWN_PCT;
   const isBotPaused = isCircuitBroken || isDrawdownBreached;
+
+  // ── Bot control toggle ────────────────────────────────────────────────
+  async function toggleBot() {
+    if (toggling) return;
+    setToggling(true);
+    const action = portfolio?.is_circuit_broken ? "resume" : "pause";
+    try {
+      const params = new URLSearchParams();
+      params.set("strategy", strategy);
+      if (runId) params.set("run_id", runId);
+      await fetch(`/api/bot-control?${params}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      await refreshPortfolio();
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  const botIsPaused = portfolio?.is_circuit_broken ?? false;
 
   return (
     <div className="space-y-6 max-w-7xl">
-      {isCircuitBroken && (
+      {/* ── Auto circuit breaker alert ── */}
+      {isAutoTripped && (
         <div
           className="rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2"
           style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid var(--red)" }}
         >
           <span className="text-lg">&#9888;</span>
           <span>
-            Circuit Breaker ACTIVE — Trading paused until{" "}
-            {new Date(portfolio!.circuit_broken_until!).toLocaleString()}
+            Circuit Breaker ACTIVE — {portfolio!.consecutive_losses ?? 0} consecutive losses.
+            Paused until {portfolio!.circuit_broken_until
+              ? new Date(portfolio!.circuit_broken_until).toLocaleString()
+              : "—"}.
+            {" "}Manual review required before resuming.
           </span>
         </div>
       )}
 
-      {!isCircuitBroken && isDrawdownBreached && (
+      {/* ── Manual stop alert ── */}
+      {isManualStop && !isAutoTripped && (
         <div
           className="rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2"
-          style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid var(--red)" }}
+          style={{ background: "#f97316" + "22", color: "#f97316", border: "1px solid #f97316" }}
         >
-          <span className="text-lg">&#9888;</span>
-          <span>
-            Drawdown limit breached — {(currentDrawdown * 100).toFixed(1)}% lost (limit 30%). Trading blocked.
-          </span>
+          <span className="text-lg">&#9646;&#9646;</span>
+          <span>Bot manually paused — click Resume to re-enable trading.</span>
         </div>
       )}
 
+      {/* ── Drawdown warning ── */}
       {!isBotPaused && currentDrawdown >= 0.15 && (
         <div
           className="rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2"
           style={{ background: "#ffd93d22", color: "var(--yellow)", border: "1px solid var(--yellow)" }}
         >
           <span className="text-lg">&#9888;</span>
-          <span>Warning — drawdown at {(currentDrawdown * 100).toFixed(1)}%, approaching limit.</span>
+          <span>
+            Warning — drawdown {(currentDrawdown * 100).toFixed(1)}% from ATH, approaching 30% limit.
+          </span>
         </div>
       )}
 
+      {/* ── Drawdown breached ── */}
+      {isDrawdownBreached && !isCircuitBroken && (
+        <div
+          className="rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2"
+          style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid var(--red)" }}
+        >
+          <span className="text-lg">&#9888;</span>
+          <span>
+            Drawdown limit breached — {(currentDrawdown * 100).toFixed(1)}% from ATH (limit 30%). Trading blocked.
+          </span>
+        </div>
+      )}
+
+      {/* ── Header row: title + bot toggle button ── */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">{strategy} Dashboard</h2>
@@ -147,7 +207,46 @@ export default function DashboardPage() {
             Paper-mode copytrading — live metrics
           </p>
         </div>
-        <TimeFilterBar selected={timeFilter} onChange={setTimeFilter} />
+
+        <div className="flex items-center gap-3">
+          {/* Bot status pill */}
+          <span
+            className="text-xs font-bold px-3 py-1 rounded-full"
+            style={
+              botIsPaused
+                ? { background: "var(--red-dim)", color: "var(--red)" }
+                : { background: "var(--green-dim)", color: "var(--green)" }
+            }
+          >
+            {botIsPaused ? "PAUSED" : "RUNNING"}
+          </span>
+
+          {/* Toggle button */}
+          <button
+            onClick={toggleBot}
+            disabled={toggling}
+            className="text-sm font-semibold px-4 py-1.5 rounded-lg transition-opacity disabled:opacity-50"
+            style={
+              botIsPaused
+                ? {
+                    background: "var(--green)",
+                    color: "#fff",
+                    border: "none",
+                    cursor: toggling ? "not-allowed" : "pointer",
+                  }
+                : {
+                    background: "var(--red)",
+                    color: "#fff",
+                    border: "none",
+                    cursor: toggling ? "not-allowed" : "pointer",
+                  }
+            }
+          >
+            {toggling ? "..." : botIsPaused ? "Resume Bot" : "Pause Bot"}
+          </button>
+
+          <TimeFilterBar selected={timeFilter} onChange={setTimeFilter} />
+        </div>
       </div>
 
       {portfolio && (
@@ -155,7 +254,7 @@ export default function DashboardPage() {
           <KpiCard
             label="Capital"
             value={`$${current.toFixed(2)}`}
-            subValue={`of $${initial.toFixed(0)}`}
+            subValue={`ATH $${peak.toFixed(0)}`}
             color="blue"
           />
           <KpiCard
@@ -182,7 +281,7 @@ export default function DashboardPage() {
           <KpiCard
             label="Drawdown"
             value={`${(currentDrawdown * 100).toFixed(1)}%`}
-            subValue="limit: 30%"
+            subValue="from ATH · limit 30%"
             color={currentDrawdown >= 0.2 ? "red" : currentDrawdown >= 0.15 ? "red" : "default"}
           />
           <KpiCard
@@ -452,3 +551,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
