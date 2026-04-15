@@ -85,26 +85,27 @@ class BasketBuilder:
         target_markets = short_term if len(short_term) >= 5 else unique[:20]
         logger.info(f"  markets: {len(unique)} unique, {len(short_term)} <=7d, using {len(target_markets)}")
 
-        # ── Step 2: collect candidates from holders ──────
+        # ── Step 2: collect candidates from market trades ───
+        # Use /trades (not /holders) — traders have completed rounds and real win rates.
         freq: Counter = Counter()
         for mkt in target_markets[:20]:
             cid = mkt.get("conditionId")
             if not cid:
                 continue
             try:
-                holders = self.data.get_market_holders(cid, limit=50)
-                for h in holders:
-                    addr = h.get("proxyWallet") or h.get("address")
+                trades = self.data.get_market_trades(cid, limit=200)
+                for t in trades:
+                    addr = t.get("proxyWallet")
                     if addr:
                         freq[addr] += 1
             except Exception as e:
-                logger.warning(f"  holders({cid[:12]}) failed: {e}")
+                logger.warning(f"  trades({cid[:12]}) failed: {e}")
             time.sleep(0.15)
 
-        # Prefer wallets seen in ≥2 markets; fall back to any presence if pool is small
-        candidates = [addr for addr, count in freq.most_common(60) if count >= 2]
+        # Prefer wallets seen in ≥2 markets; fall back to ≥1 if pool is small
+        candidates = [addr for addr, count in freq.most_common(80) if count >= 2]
         if len(candidates) < 10:
-            candidates = [addr for addr, count in freq.most_common(60) if count >= 1]
+            candidates = [addr for addr, count in freq.most_common(80) if count >= 1]
             logger.info(f"  candidates (≥1 market, fallback): {len(candidates)}")
         else:
             logger.info(f"  candidates with ≥2 market presence: {len(candidates)}")
