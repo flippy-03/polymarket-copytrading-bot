@@ -113,6 +113,11 @@ def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
         buys = [t for t in mkt_trades if t.get("side") == "BUY"]
         sells = [t for t in mkt_trades if t.get("side") == "SELL"]
 
+        # Only count markets with at least one SELL (position closed/exited).
+        # Markets where wallet only bought (still open) are excluded — counting
+        # them as losses would give 0% win_rate to any wallet with open positions.
+        if not sells:
+            continue
         net = sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)
         if net > 0:
             wins += 1
