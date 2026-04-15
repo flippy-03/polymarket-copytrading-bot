@@ -50,13 +50,14 @@ class ConsensusEngine:
         cid = trade.get("conditionId")
         if not cid:
             return
+        from src.strategies.common.wallet_analyzer import _usdc
         self.recent_positions[cid][wallet] = {
             "side": trade.get("side"),
             "outcome": trade.get("outcome"),
             "asset": trade.get("asset"),
             "price": float(trade.get("price") or 0),
             "ts": int(trade.get("timestamp") or time.time()),
-            "usdcSize": float(trade.get("usdcSize") or 0),
+            "usdcSize": _usdc(trade),
             "title": trade.get("title") or "",
             "slug": trade.get("slug") or "",
         }

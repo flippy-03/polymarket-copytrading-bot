@@ -12,6 +12,7 @@ import random
 from src.db import supabase_client as _db
 from src.strategies.common import clob_exec, config as C, db
 from src.strategies.common.data_client import DataClient
+from src.strategies.common.wallet_analyzer import _usdc
 from src.utils.logger import logger
 
 
@@ -48,7 +49,8 @@ class ScalperExecutor:
 
         outcome = (trade.get("outcome") or "").strip()
         direction = "YES" if outcome.lower().startswith("y") else "NO"
-        titular_usdc = float(trade.get("usdcSize") or 0)
+        # Use shared fallback so trades without usdcSize still mirror correctly.
+        titular_usdc = _usdc(trade)
         size_usd = round(self._copy_size(titular_usdc), 2)
         if size_usd < C.SCALPER_MIN_PER_TRADE:
             return None

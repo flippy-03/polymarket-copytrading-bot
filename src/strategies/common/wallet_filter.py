@@ -9,6 +9,11 @@ from src.strategies.common.wallet_analyzer import WalletMetrics
 def passes_tier1(m: WalletMetrics) -> tuple[bool, str]:
     if m.total_trades < C.MIN_TRADES_TOTAL:
         return False, f"trades={m.total_trades} < {C.MIN_TRADES_TOTAL}"
+    # All-time PnL sanity check — rejects wallets with net-negative history.
+    # Uses /positions cashPnl as source of truth (not the biased by-market
+    # reconstruction from activity that ignored hold-to-resolution markets).
+    if m.total_pnl < C.MIN_TOTAL_PNL_USD:
+        return False, f"total_pnl=${m.total_pnl:.0f} < ${C.MIN_TOTAL_PNL_USD:.0f}"
     if m.win_rate < C.MIN_WIN_RATE:
         return False, f"win_rate={m.win_rate:.2%} < {C.MIN_WIN_RATE:.0%}"
     if m.track_record_days < C.MIN_TRACK_RECORD_DAYS:

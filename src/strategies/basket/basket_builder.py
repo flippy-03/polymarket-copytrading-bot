@@ -28,12 +28,16 @@ from src.utils.logger import logger
 
 def _composite_score(m: WalletMetrics) -> float:
     pf = min(m.profit_factor, 5.0) if m.profit_factor != float("inf") else 5.0
+    # PnL bonus: 0..5 pts, saturates at $5000 net profit.
+    # Tier 1 already rejects negative total_pnl, so this is always ≥0 here.
+    pnl_bonus = min(max(m.total_pnl / 1000.0, 0.0), 5.0)
     return (
-        pf * 0.30
-        + (m.edge_vs_odds * 100) * 0.25
-        + min(m.trades_per_month / 20, 1) * 0.20
-        + m.positive_weeks_pct * 0.15
+        pf * 0.25
+        + (m.edge_vs_odds * 100) * 0.20
+        + min(m.trades_per_month / 20, 1) * 0.15
+        + m.positive_weeks_pct * 0.10
         + (0 if m.is_likely_bot else 1) * 0.10
+        + pnl_bonus * 0.20
     )
 
 
@@ -195,7 +199,13 @@ class BasketBuilder:
                 if len(trades) < C.MIN_TRADES_TOTAL:
                     skipped_few_trades += 1
                     continue
-                metrics = analyze_wallet(trades, addr)
+                # Positions = authoritative per-market PnL (includes hold-to-resolution).
+                try:
+                    positions = self.data.get_wallet_positions(addr, limit=500)
+                except Exception as e:
+                    logger.warning(f"  positions {addr[:10]}… failed: {e}; analyzing trades-only")
+                    positions = None
+                metrics = analyze_wallet(trades, addr, positions)
                 analyzed.append((metrics, trades))
             except Exception as e:
                 logger.warning(f"  analyze {addr[:10]}… failed: {e}")
@@ -213,6 +223,7 @@ class BasketBuilder:
                 f"trades={metrics.total_trades} "
                 f"WR={metrics.win_rate:.1%} "
                 f"days={metrics.track_record_days} "
+                f"total_pnl={metrics.total_pnl:.0f} "
                 f"pnl30d={metrics.pnl_30d:.0f} "
                 f"freq={metrics.trades_per_month:.1f}/mo "
                 f"→ T1={'OK' if t1_ok else t1_reason}"

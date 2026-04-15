@@ -13,6 +13,7 @@ import time
 
 from src.strategies.common import config as C, db
 from src.strategies.common.data_client import DataClient
+from src.strategies.common.wallet_analyzer import _usdc
 from src.strategies.scalper.pool_builder import estimate_sharpe_14d
 from src.utils.logger import logger
 
@@ -25,7 +26,7 @@ def _sum_pnl(trades: list[dict], days: int) -> float:
         ts = int(t.get("timestamp") or 0)
         if ts < cutoff:
             continue
-        usdc = float(t.get("usdcSize") or 0)
+        usdc = _usdc(t)
         if (t.get("side") or "").upper() == "SELL":
             pnl += usdc
         else:

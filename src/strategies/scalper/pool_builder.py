@@ -12,7 +12,7 @@ import numpy as np
 from src.strategies.common import config as C, db
 from src.strategies.common.data_client import DataClient
 from src.strategies.common.gamma_client import GammaClient
-from src.strategies.common.wallet_analyzer import WalletMetrics, analyze_wallet
+from src.strategies.common.wallet_analyzer import WalletMetrics, _usdc, analyze_wallet
 from src.strategies.common.wallet_filter import full_filter_pipeline
 from src.utils.logger import logger
 
@@ -27,7 +27,8 @@ def estimate_sharpe_14d(trades: list[dict]) -> float:
     daily_pnl: dict[datetime.date, float] = defaultdict(float)
     for t in recent:
         day = datetime.datetime.utcfromtimestamp(int(t["timestamp"])).date()
-        usdc = float(t.get("usdcSize") or 0)
+        # Use shared fallback so wallets with missing usdcSize still contribute.
+        usdc = _usdc(t)
         if (t.get("side") or "").upper() == "SELL":
             daily_pnl[day] += usdc
         else:
@@ -151,7 +152,13 @@ class ScalperPoolBuilder:
                 trades = self.data.get_all_wallet_trades(addr, start=four_months_ago)
                 if len(trades) < C.MIN_TRADES_TOTAL:
                     continue
-                metrics = analyze_wallet(trades, addr)
+                # Positions = authoritative per-market PnL (hold-to-resolution safe).
+                try:
+                    positions = self.data.get_wallet_positions(addr, limit=500)
+                except Exception as e:
+                    logger.warning(f"  positions {addr[:10]}… failed: {e}; analyzing trades-only")
+                    positions = None
+                metrics = analyze_wallet(trades, addr, positions)
                 if metrics.avg_holding_period_hours > 5 * 24:
                     continue
                 if metrics.trades_per_month < 12:

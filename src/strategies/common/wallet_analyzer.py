@@ -60,33 +60,77 @@ _CATEGORY_KEYWORDS = {
 }
 
 
-def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
+def _usdc(t):
+    try:
+        v = t.get("usdcSize")
+        if v is not None:
+            return float(v)
+    except (TypeError, ValueError):
+        pass
+    # Fallback: size * price (used by market /trades endpoint)
+    try:
+        return float(t.get("size") or 0) * float(t.get("price") or 0.5)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def analyze_wallet(
+    trades: list[dict],
+    address: str,
+    positions: list[dict] | None = None,
+) -> WalletMetrics:
+    """
+    Derive WalletMetrics from activity trades and (optionally) current positions.
+
+    PnL source-of-truth hierarchy:
+      1. For markets present in `positions`: use `cashPnl` directly.
+         This captures hold-to-resolution correctly (markets that auto-redeemed
+         with no explicit SELL row but with a final outcome).
+      2. For markets only in `trades` (user fully sold out): compute net from
+         activity buy/sell flow.
+
+    Passing `positions=None` falls back to activity-only analysis — biased for
+    hold-to-resolution wallets but kept for non-builder callers that don't have
+    a DataClient handy.
+    """
     m = WalletMetrics(address=address)
-    if not trades:
+    if not trades and not positions:
         return m
 
     m.total_trades = len(trades)
     timestamps = sorted(int(t.get("timestamp") or 0) for t in trades)
-    m.first_trade_ts = timestamps[0]
-    m.last_trade_ts = timestamps[-1]
-    m.track_record_days = max((m.last_trade_ts - m.first_trade_ts) // 86400, 0)
+    if timestamps:
+        m.first_trade_ts = timestamps[0]
+        m.last_trade_ts = timestamps[-1]
+        m.track_record_days = max((m.last_trade_ts - m.first_trade_ts) // 86400, 0)
 
     if m.track_record_days > 0:
         m.trades_per_month = m.total_trades / (m.track_record_days / 30)
 
     # ── Category detection (heuristic on slug/title) ─────
+    # Positions also carry `title`/`slug`, so mix both sources to avoid
+    # undercounting categories when a wallet holds-to-resolution.
     found_cats: set[str] = set()
-    for t in trades:
-        title = (t.get("title") or "").lower()
-        slug = (t.get("slug") or "").lower()
-        combined = f"{title} {slug}"
-        for cat, kws in _CATEGORY_KEYWORDS.items():
-            if any(kw in combined for kw in kws):
-                found_cats.add(cat)
+    def _collect_cats(rows):
+        for r in rows or []:
+            title = (r.get("title") or "").lower()
+            slug = (r.get("slug") or "").lower()
+            combined = f"{title} {slug}"
+            for cat, kws in _CATEGORY_KEYWORDS.items():
+                if any(kw in combined for kw in kws):
+                    found_cats.add(cat)
+    _collect_cats(trades)
+    _collect_cats(positions)
     m.categories = sorted(found_cats)
     m.unique_categories = len(found_cats)
 
-    # ── Group trades by market → compute PnL, holding periods ──
+    # ── Build per-market view, merging positions + activity ──
+    pos_by_cid: dict[str, dict] = {}
+    for p in positions or []:
+        cid = p.get("conditionId")
+        if cid:
+            pos_by_cid[cid] = p
+
     by_market: dict[str, list[dict]] = defaultdict(list)
     for t in trades:
         by_market[t.get("conditionId") or "unknown"].append(t)
@@ -100,32 +144,67 @@ def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
     gross_loss = 0.0
     pnl_30d = 0.0
     pnl_7d = 0.0
+    total_pnl = 0.0
     holding_periods: list[float] = []
     entry_prices: list[float] = []
 
-    def _usdc(t):
+    # --- A. Markets present in /positions (authoritative PnL) --------
+    for cid, pos in pos_by_cid.items():
         try:
-            v = t.get("usdcSize")
-            if v is not None:
-                return float(v)
+            cash_pnl = float(pos.get("cashPnl") or 0)
         except (TypeError, ValueError):
-            pass
-        # Fallback: size * price (used by market /trades endpoint)
-        try:
-            return float(t.get("size") or 0) * float(t.get("price") or 0.5)
-        except (TypeError, ValueError):
-            return 0.0
+            cash_pnl = 0.0
+        total_pnl += cash_pnl
+        if cash_pnl > 0:
+            wins += 1
+            gross_profit += cash_pnl
+        elif cash_pnl < 0:
+            losses += 1
+            gross_loss += abs(cash_pnl)
 
+        # Holding period / entry price / activity-window flow still use trades.
+        mkt_trades = by_market.get(cid, [])
+        buys = [t for t in mkt_trades if t.get("side") == "BUY"]
+        sells = [t for t in mkt_trades if t.get("side") == "SELL"]
+        for t in mkt_trades:
+            ts = int(t.get("timestamp") or 0)
+            usdc = _usdc(t)
+            if ts >= ts_30d:
+                pnl_30d += usdc if t.get("side") == "SELL" else -usdc
+            if ts >= ts_7d:
+                pnl_7d += usdc if t.get("side") == "SELL" else -usdc
+        if buys and sells:
+            first_buy = min(int(t.get("timestamp") or 0) for t in buys)
+            last_sell = max(int(t.get("timestamp") or 0) for t in sells)
+            hp_hours = (last_sell - first_buy) / 3600
+            if hp_hours > 0:
+                holding_periods.append(hp_hours)
+        for t in buys:
+            try:
+                entry_prices.append(float(t.get("price") or 0.5))
+            except (TypeError, ValueError):
+                pass
+
+    # --- B. Markets only in /activity (fully exited, not in positions) ---
     for cid, mkt_trades in by_market.items():
+        if cid in pos_by_cid:
+            continue
         buys = [t for t in mkt_trades if t.get("side") == "BUY"]
         sells = [t for t in mkt_trades if t.get("side") == "SELL"]
 
-        # Only count markets with at least one SELL (position closed/exited).
-        # Markets where wallet only bought (still open) are excluded — counting
-        # them as losses would give 0% win_rate to any wallet with open positions.
+        # With /positions as primary source, a market only appearing in activity
+        # is one the wallet fully cashed out of. If there are no sells either,
+        # fall back to net=buys*-1 only when positions were never available
+        # (legacy path). When positions=None, keep pre-fix behavior (skip).
         if not sells:
+            if positions is not None:
+                # Fully bought, nothing in positions → edge case (dusted/transferred).
+                # Skip silently rather than counting as a loss of unknown size.
+                continue
+            # Legacy path (no positions provided): preserve old behavior.
             continue
         net = sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)
+        total_pnl += net
         if net > 0:
             wins += 1
             gross_profit += net
@@ -140,14 +219,12 @@ def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
                 pnl_30d += usdc if t.get("side") == "SELL" else -usdc
             if ts >= ts_7d:
                 pnl_7d += usdc if t.get("side") == "SELL" else -usdc
-
         if buys and sells:
             first_buy = min(int(t.get("timestamp") or 0) for t in buys)
             last_sell = max(int(t.get("timestamp") or 0) for t in sells)
             hp_hours = (last_sell - first_buy) / 3600
             if hp_hours > 0:
                 holding_periods.append(hp_hours)
-
         for t in buys:
             try:
                 entry_prices.append(float(t.get("price") or 0.5))
@@ -158,7 +235,7 @@ def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
     m.win_rate = wins / total_markets if total_markets > 0 else 0.0
     m.pnl_30d = pnl_30d
     m.pnl_7d = pnl_7d
-    m.total_pnl = gross_profit - gross_loss
+    m.total_pnl = total_pnl
     m.profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("inf")
     m.avg_holding_period_hours = float(np.mean(holding_periods)) if holding_periods else 0.0
 

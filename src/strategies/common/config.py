@@ -32,6 +32,9 @@ MIN_TRADES_PER_MONTH = 4          # relaxed 8→4 for backtest
 REQUIRE_POSITIVE_PNL_30D = True
 PNL_30D_TOLERANCE = -5.0          # allow up to $5 negative (rounding/dust trades)
 REQUIRE_NONNEGATIVE_PNL_7D = False  # relaxed: 7d window too noisy for volatile events
+# All-time PnL floor (uses /positions cashPnl as source of truth, not biased activity).
+# 0 rejects net-losers; set negative to allow small drawdown tolerance.
+MIN_TOTAL_PNL_USD = 0.0
 
 # ── Tier 2 filters (edge quality) ────────────────────────
 MIN_PROFIT_FACTOR = 1.5
