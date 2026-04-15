@@ -120,7 +120,8 @@ class BasketBuilder:
                 continue
             try:
                 mkt_trades = self.data.get_market_trades(cid, limit=300)
-                # Group by wallet and compute net USDC
+                # Group by wallet and compute net USDC.
+                # Market /trades uses `size` (shares) + `price`, not `usdcSize`.
                 wallet_net: dict[str, float] = defaultdict(float)
                 for t in mkt_trades:
                     addr = t.get("proxyWallet")
@@ -128,7 +129,12 @@ class BasketBuilder:
                         continue
                     market_appearances[addr] += 1
                     try:
-                        usdc = float(t.get("usdcSize") or 0)
+                        # usdcSize is on wallet /activity; market /trades uses size*price
+                        usdc = (
+                            float(t["usdcSize"])
+                            if "usdcSize" in t
+                            else float(t.get("size") or 0) * float(t.get("price") or 0.5)
+                        )
                     except (TypeError, ValueError):
                         usdc = 0.0
                     if t.get("side") == "SELL":
