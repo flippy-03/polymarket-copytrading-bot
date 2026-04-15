@@ -76,7 +76,27 @@ class GammaClient:
         if tag_id is not None:
             params["tag_id"] = tag_id
         markets = self._get("/markets", params) or []
-        return [m for m in markets if (m.get("volume24hr") or 0) >= min_volume_24h]
+        if not markets:
+            return []
+        # Gamma API may use different field names across versions; try all known ones.
+        def _vol(m: dict) -> float:
+            return float(
+                m.get("volume24hr")
+                or m.get("volume24Hr")
+                or m.get("volume_24hr")
+                or m.get("volumeClob")
+                or m.get("volume")
+                or 0
+            )
+        if min_volume_24h > 0:
+            # Debug: log once to surface the actual field names in the response
+            first = markets[0]
+            vol_fields = {k: v for k, v in first.items() if "vol" in k.lower()}
+            if not vol_fields:
+                logger.debug(f"Gamma market keys (no vol field found): {list(first.keys())}")
+            else:
+                logger.debug(f"Gamma volume fields: {vol_fields}")
+        return [m for m in markets if _vol(m) >= min_volume_24h]
 
     def get_events_by_tag(
         self,

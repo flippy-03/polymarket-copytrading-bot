@@ -66,9 +66,16 @@ class DataClient:
         all_trades: list[dict] = []
         offset = 0
         for _ in range(max_pages):
-            batch = self.get_wallet_activity(
-                wallet, type_filter="TRADE", start=start, limit=500, offset=offset
-            )
+            try:
+                batch = self.get_wallet_activity(
+                    wallet, type_filter="TRADE", start=start, limit=500, offset=offset
+                )
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 400 and offset > 0:
+                    # Data API rejects deep pagination (offset > ~3000).
+                    # Return what we have rather than failing the whole wallet.
+                    break
+                raise
             if not batch:
                 break
             all_trades.extend(batch)
