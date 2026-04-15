@@ -41,7 +41,8 @@ export async function GET(request: Request) {
   if (source === "scalper" || source === "all") {
     let poolQuery = supabase
       .from("scalper_pool")
-      .select("wallet_address, status, sharpe_14d, rank_position, capital_allocated_usd");
+      .select("wallet_address, status, sharpe_14d, rank_position, capital_allocated_usd")
+      .is("exited_at", null);
     if (runId) poolQuery = poolQuery.eq("run_id", runId);
     const { data: pool } = await poolQuery;
     scalperMap = new Map((pool ?? []).map((p) => [p.wallet_address as string, p]));

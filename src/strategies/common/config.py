@@ -24,7 +24,7 @@ BASKET_INITIAL_CAPITAL = float(os.getenv("BASKET_INITIAL_CAPITAL", "1000"))
 SCALPER_INITIAL_CAPITAL = float(os.getenv("SCALPER_INITIAL_CAPITAL", "1000"))
 
 # ── Tier 1 filters (elimination) ─────────────────────────
-MIN_WIN_RATE = 0.55               # relaxed 0.60→0.55 for backtest
+MIN_WIN_RATE = 0.50               # relaxed 0.60→0.55→0.50; allow high-volume grinders
 MIN_TRADES_TOTAL = 50             # relaxed 100→50 for backtest
 MIN_TRACK_RECORD_DAYS = 30        # relaxed 120→60→30; many good traders active <2mo
 MAX_HOLDING_PERIOD_DAYS = 21      # relaxed 7→21; prediction markets resolve over weeks
@@ -34,7 +34,7 @@ PNL_30D_TOLERANCE = -5.0          # allow up to $5 negative (rounding/dust trade
 REQUIRE_NONNEGATIVE_PNL_7D = False  # relaxed: 7d window too noisy for volatile events
 # All-time PnL floor (uses /positions cashPnl as source of truth, not biased activity).
 # 0 rejects net-losers; set negative to allow small drawdown tolerance.
-MIN_TOTAL_PNL_USD = 0.0
+MIN_TOTAL_PNL_USD = 150.0
 
 # ── Tier 2 filters (edge quality) ────────────────────────
 MIN_PROFIT_FACTOR = 1.5

@@ -193,6 +193,7 @@ class BasketBuilder:
             (datetime.datetime.utcnow() - datetime.timedelta(days=120)).timestamp()
         )
         skipped_few_trades = 0
+        skipped_off_category = 0
         for i, addr in enumerate(candidates[:50]):
             try:
                 trades = self.data.get_all_wallet_trades(addr, start=four_months_ago)
@@ -206,13 +207,21 @@ class BasketBuilder:
                     logger.warning(f"  positions {addr[:10]}… failed: {e}; analyzing trades-only")
                     positions = None
                 metrics = analyze_wallet(trades, addr, positions)
+                # Category-specialist filter: require the wallet's trade history
+                # to include the target category. Wallets that were profitable
+                # in one resolved market but primarily trade other categories
+                # are excluded from this basket.
+                if category.lower() not in [c.lower() for c in metrics.categories]:
+                    skipped_off_category += 1
+                    continue
                 analyzed.append((metrics, trades))
             except Exception as e:
                 logger.warning(f"  analyze {addr[:10]}… failed: {e}")
             time.sleep(0.2)
         logger.info(
             f"  analyzed wallets with enough data: {len(analyzed)} "
-            f"(skipped {skipped_few_trades} with <{C.MIN_TRADES_TOTAL} trades)"
+            f"(skipped {skipped_few_trades} <{C.MIN_TRADES_TOTAL} trades, "
+            f"{skipped_off_category} off-category)"
         )
         # Sample log: show metrics for first 5 analyzed wallets
         for metrics, _ in analyzed[:5]:
