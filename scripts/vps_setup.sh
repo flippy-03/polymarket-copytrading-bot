@@ -44,6 +44,7 @@ echo "  Dependencias instaladas"
 
 # ── 3. Builds iniciales ───────────────────────────────────────────────────────
 echo "[3/4] Ejecutando builds iniciales…"
+export PYTHONPATH="$INSTALL_DIR"
 echo "  → Basket build (puede tardar 2-5 min)…"
 $PYTHON scripts/run_basket_strategy.py --build-only
 echo "  → Scalper pool build…"
@@ -71,6 +72,7 @@ User=$CURRENT_USER
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$VENV_PYTHON scripts/run_basket_strategy.py --run
 EnvironmentFile=$INSTALL_DIR/.env
+Environment=PYTHONPATH=$INSTALL_DIR
 Restart=always
 RestartSec=30
 StandardOutput=journal
@@ -93,6 +95,7 @@ User=$CURRENT_USER
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$VENV_PYTHON scripts/run_scalper_strategy.py --run
 EnvironmentFile=$INSTALL_DIR/.env
+Environment=PYTHONPATH=$INSTALL_DIR
 Restart=always
 RestartSec=30
 StandardOutput=journal
