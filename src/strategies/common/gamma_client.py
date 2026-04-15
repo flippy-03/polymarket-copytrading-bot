@@ -74,7 +74,7 @@ class GammaClient:
             "offset": offset,
         }
         if tag_id is not None:
-            params["tag_id"] = tag_id
+            params["tag"] = tag_id  # Gamma API uses "tag", not "tag_id"
         markets = self._get("/markets", params) or []
         if not markets:
             return []
