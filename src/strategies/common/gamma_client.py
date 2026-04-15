@@ -140,6 +140,27 @@ class GammaClient:
         ]
         return sorted(result, key=lambda m: m.get("volume24hr") or 0, reverse=True)
 
+    def get_resolved_markets(
+        self,
+        tag_id: Optional[int] = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Recently resolved (closed=true) markets for a given tag.
+        These markets have outcomePrices showing who won — useful for
+        identifying wallets that correctly predicted outcomes.
+        """
+        params = {
+            "active": "false",
+            "closed": "true",
+            "order": "volume",
+            "ascending": "false",
+            "limit": limit,
+        }
+        if tag_id is not None:
+            params["tag"] = tag_id
+        return self._get("/markets", params) or []
+
     def get_market_by_slug(self, slug: str) -> dict:
         return self._get(f"/markets/slug/{slug}")
 

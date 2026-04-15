@@ -85,27 +85,69 @@ class BasketBuilder:
         target_markets = short_term if len(short_term) >= 5 else unique[:20]
         logger.info(f"  markets: {len(unique)} unique, {len(short_term)} <=7d, using {len(target_markets)}")
 
-        # ── Step 2: collect candidates from market trades ───
-        # Use /trades (not /holders) — traders have completed rounds and real win rates.
+        # ── Step 2: collect candidates ───────────────────────────────────────────
+        # Primary source: recently RESOLVED markets — these have completed trades
+        # with real win/loss outcomes, giving us wallets with proven track records.
+        # Secondary source: active markets — supplement if resolved pool is thin.
         freq: Counter = Counter()
-        for mkt in target_markets[:20]:
+
+        # 2a — resolved markets (preferred: completed PnL, proven traders)
+        resolved_markets: list[dict] = []
+        for tag_id in tag_ids:
+            try:
+                batch = self.gamma.get_resolved_markets(tag_id=tag_id, limit=30)
+                resolved_markets.extend(batch)
+            except Exception as e:
+                logger.warning(f"  get_resolved_markets(tag_id={tag_id}) failed: {e}")
+            time.sleep(0.2)
+        # deduplicate
+        seen_resolved: set[str] = set()
+        unique_resolved: list[dict] = []
+        for m in resolved_markets:
+            cid = m.get("conditionId")
+            if cid and cid not in seen_resolved:
+                seen_resolved.add(cid)
+                unique_resolved.append(m)
+        logger.info(f"  resolved markets found: {len(unique_resolved)}")
+
+        for mkt in unique_resolved[:25]:
             cid = mkt.get("conditionId")
             if not cid:
                 continue
             try:
-                trades = self.data.get_market_trades(cid, limit=200)
+                trades = self.data.get_market_trades(cid, limit=300)
                 for t in trades:
                     addr = t.get("proxyWallet")
                     if addr:
                         freq[addr] += 1
             except Exception as e:
-                logger.warning(f"  trades({cid[:12]}) failed: {e}")
+                logger.warning(f"  resolved trades({cid[:12]}) failed: {e}")
             time.sleep(0.15)
 
+        resolved_candidate_count = len([a for a, c in freq.most_common(100) if c >= 1])
+        logger.info(f"  wallets from resolved markets: {resolved_candidate_count}")
+
+        # 2b — active markets (supplement when resolved pool is thin)
+        if resolved_candidate_count < 20:
+            logger.info(f"  supplementing with active market traders (resolved pool thin)")
+            for mkt in target_markets[:15]:
+                cid = mkt.get("conditionId")
+                if not cid:
+                    continue
+                try:
+                    trades = self.data.get_market_trades(cid, limit=200)
+                    for t in trades:
+                        addr = t.get("proxyWallet")
+                        if addr:
+                            freq[addr] += 1
+                except Exception as e:
+                    logger.warning(f"  active trades({cid[:12]}) failed: {e}")
+                time.sleep(0.15)
+
         # Prefer wallets seen in ≥2 markets; fall back to ≥1 if pool is small
-        candidates = [addr for addr, count in freq.most_common(80) if count >= 2]
+        candidates = [addr for addr, count in freq.most_common(100) if count >= 2]
         if len(candidates) < 10:
-            candidates = [addr for addr, count in freq.most_common(80) if count >= 1]
+            candidates = [addr for addr, count in freq.most_common(100) if count >= 1]
             logger.info(f"  candidates (≥1 market, fallback): {len(candidates)}")
         else:
             logger.info(f"  candidates with ≥2 market presence: {len(candidates)}")
@@ -115,17 +157,35 @@ class BasketBuilder:
         four_months_ago = int(
             (datetime.datetime.utcnow() - datetime.timedelta(days=120)).timestamp()
         )
-        for i, addr in enumerate(candidates[:30]):
+        skipped_few_trades = 0
+        for i, addr in enumerate(candidates[:50]):
             try:
                 trades = self.data.get_all_wallet_trades(addr, start=four_months_ago)
                 if len(trades) < C.MIN_TRADES_TOTAL:
+                    skipped_few_trades += 1
                     continue
                 metrics = analyze_wallet(trades, addr)
                 analyzed.append((metrics, trades))
             except Exception as e:
                 logger.warning(f"  analyze {addr[:10]}… failed: {e}")
             time.sleep(0.2)
-        logger.info(f"  analyzed wallets with enough data: {len(analyzed)}")
+        logger.info(
+            f"  analyzed wallets with enough data: {len(analyzed)} "
+            f"(skipped {skipped_few_trades} with <{C.MIN_TRADES_TOTAL} trades)"
+        )
+        # Sample log: show metrics for first 5 analyzed wallets
+        for metrics, _ in analyzed[:5]:
+            from src.strategies.common.wallet_filter import passes_tier1
+            t1_ok, t1_reason = passes_tier1(metrics)
+            logger.info(
+                f"  sample {metrics.address[:10]}… "
+                f"trades={metrics.total_trades} "
+                f"WR={metrics.win_rate:.1%} "
+                f"days={metrics.track_record_days} "
+                f"pnl30d={metrics.pnl_30d:.0f} "
+                f"freq={metrics.trades_per_month:.1f}/mo "
+                f"→ T1={'OK' if t1_ok else t1_reason}"
+            )
 
         # ── Step 4: filter pipeline ──────────────────────
         passed: list[WalletMetrics] = []
@@ -163,10 +223,10 @@ class BasketBuilder:
                         break
 
         logger.info(f"  passed filters: {len(passed)}/{len(analyzed)}")
-        if passed == [] and rejected:
+        if rejected:
             from collections import Counter as _C
             reason_counts = _C(r["reason"] for r in rejected)
-            logger.info(f"  rejection reasons: {dict(reason_counts.most_common(5))}")
+            logger.info(f"  rejection reasons: {dict(reason_counts.most_common(8))}")
 
         # ── Step 5: rank and pick ────────────────────────
         scored = sorted(passed, key=_composite_score, reverse=True)
