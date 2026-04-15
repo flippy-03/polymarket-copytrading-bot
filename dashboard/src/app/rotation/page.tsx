@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useAutoRefresh, timeAgo } from "@/lib/hooks";
+import { useStrategy } from "@/lib/strategy-context";
 
 type PoolRow = {
   wallet_address: string;
@@ -35,10 +36,13 @@ type Response = {
 };
 
 export default function RotationPage() {
-  const fetcher = useCallback(
-    () => fetch("/api/rotation").then((r) => r.json()),
-    [],
-  );
+  const { runId } = useStrategy();
+  const fetcher = useCallback(() => {
+    const params = new URLSearchParams();
+    if (runId) params.set("run_id", runId);
+    const qs = params.toString();
+    return fetch(`/api/rotation${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  }, [runId]);
   const { data, loading } = useAutoRefresh<Response>(fetcher, 60000);
 
   const pool = data?.pool ?? [];

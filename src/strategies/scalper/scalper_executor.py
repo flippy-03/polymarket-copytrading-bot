@@ -3,6 +3,9 @@ Scalper Executor — mirror-opens and mirror-closes paper trades against the
 titular wallets' live activity. Sizing is 5-10% of the titular trade, clamped
 to [SCALPER_MIN_PER_TRADE, SCALPER_MAX_PER_TRADE] and bounded by the strategy
 capital share assigned to that titular.
+
+Every real trade is mirrored by a shadow trade (fixed $100, no risk gating).
+Shadow stops are evaluated on every tick via clob_exec.evaluate_shadow_stops.
 """
 from src.db import supabase_client as _db
 from src.strategies.common import clob_exec, config as C, db
@@ -13,9 +16,14 @@ from src.utils.logger import logger
 class ScalperExecutor:
     STRATEGY = "SCALPER"
 
-    def __init__(self, data: DataClient | None = None):
+    def __init__(self, data: DataClient | None = None, *, run_id: str | None = None):
         self.data = data or DataClient()
         self._owns_data = data is None
+        self.run_id = run_id or db.get_active_run(self.STRATEGY)
+        db.ensure_portfolio_row(
+            self.STRATEGY, run_id=self.run_id, is_shadow=True,
+            initial_capital=C.SCALPER_INITIAL_CAPITAL, max_open_positions=C.MAX_OPEN_POSITIONS,
+        )
 
     def close(self):
         if self._owns_data:
@@ -30,7 +38,7 @@ class ScalperExecutor:
 
     # ── open ─────────────────────────────────────────────
 
-    def mirror_open(self, titular: str, trade: dict) -> str | None:
+    def mirror_open(self, titular: str, trade: dict) -> dict | None:
         cid = trade.get("conditionId")
         asset = trade.get("asset")
         if not cid or not asset:
@@ -43,13 +51,15 @@ class ScalperExecutor:
         if size_usd < C.SCALPER_MIN_PER_TRADE:
             return None
 
-        # Dedupe: don't open a second position for the same (titular, asset) if already OPEN.
+        # Dedupe against OPEN real trades for the same (titular, asset) within this run.
         client = _db.get_client()
         existing = (
             client.table("copy_trades")
             .select("id")
+            .eq("run_id", self.run_id)
             .eq("strategy", self.STRATEGY)
             .eq("status", "OPEN")
+            .eq("is_shadow", False)
             .eq("source_wallet", titular)
             .eq("outcome_token_id", asset)
             .limit(1)
@@ -65,6 +75,7 @@ class ScalperExecutor:
             outcome_token_id=asset,
             direction=direction,
             size_usd=size_usd,
+            run_id=self.run_id,
             source_wallet=titular,
             market_question=trade.get("title") or trade.get("question"),
             market_category=None,
@@ -82,16 +93,39 @@ class ScalperExecutor:
         if not asset:
             return 0
         client = _db.get_client()
-        rows = (
+        # Close real trades
+        real_rows = (
             client.table("copy_trades")
             .select("id")
+            .eq("run_id", self.run_id)
             .eq("strategy", self.STRATEGY)
             .eq("status", "OPEN")
+            .eq("is_shadow", False)
             .eq("source_wallet", titular)
             .eq("outcome_token_id", asset)
             .execute()
             .data
         )
-        for r in rows:
+        for r in real_rows:
             clob_exec.close_paper_trade(r["id"], reason="SCALPER_TITULAR_EXIT")
-        return len(rows)
+        # Close shadow trades (pure side) for the same titular/asset
+        shadow_rows = (
+            client.table("copy_trades")
+            .select("id")
+            .eq("run_id", self.run_id)
+            .eq("strategy", self.STRATEGY)
+            .eq("status", "OPEN")
+            .eq("is_shadow", True)
+            .eq("source_wallet", titular)
+            .eq("outcome_token_id", asset)
+            .execute()
+            .data
+        )
+        for r in shadow_rows:
+            clob_exec.close_shadow_trade(r["id"], reason="SCALPER_TITULAR_EXIT")
+        return len(real_rows) + len(shadow_rows)
+
+    # ── tick-level shadow stops ──────────────────────────
+
+    def evaluate_shadow_stops(self) -> int:
+        return clob_exec.evaluate_shadow_stops(self.STRATEGY, run_id=self.run_id)

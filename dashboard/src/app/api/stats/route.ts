@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { resolveStrategy } from "@/lib/strategy-param";
+import {
+  isShadowFilter,
+  resolveRunId,
+  resolveShadowMode,
+  resolveStrategy,
+} from "@/lib/strategy-param";
 
 export const dynamic = "force-dynamic";
 
@@ -12,18 +17,28 @@ type ClosedTrade = {
   close_reason: string | null;
   market_polymarket_id: string | null;
   market_question: string | null;
+  is_shadow: boolean | null;
 };
 
 export async function GET(request: Request) {
   const strategy = resolveStrategy(request);
+  const shadowMode = resolveShadowMode(request);
+  const runId = await resolveRunId(request, strategy);
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("copy_trades")
-    .select("pnl_usd, opened_at, closed_at, direction, close_reason, market_polymarket_id, market_question")
+    .select(
+      "pnl_usd, opened_at, closed_at, direction, close_reason, market_polymarket_id, market_question, is_shadow",
+    )
     .eq("strategy", strategy)
     .eq("status", "CLOSED")
     .order("closed_at", { ascending: true });
 
+  if (runId) query = query.eq("run_id", runId);
+  const isShadow = isShadowFilter(shadowMode);
+  if (isShadow !== null) query = query.eq("is_shadow", isShadow);
+
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const closed = (data ?? []) as ClosedTrade[];
 
@@ -92,6 +107,8 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     strategy,
+    shadowMode,
+    runId,
     totalTrades: closed.length,
     wins: wins.length,
     losses: losses.length,

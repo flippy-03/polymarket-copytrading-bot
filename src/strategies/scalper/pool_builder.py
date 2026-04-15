@@ -44,9 +44,12 @@ def estimate_sharpe_14d(trades: list[dict]) -> float:
 
 
 class ScalperPoolBuilder:
+    STRATEGY = "SCALPER"
+
     def __init__(self):
         self.gamma = GammaClient()
         self.data = DataClient()
+        self.run_id = db.get_active_run(self.STRATEGY)
 
     def close(self):
         self.gamma.close()
@@ -122,6 +125,7 @@ class ScalperPoolBuilder:
                     is_bot=not bool(bot.get("pass", True)),
                     bot_score=int(bot.get("passed") or 0),
                     sharpe_14d=sharpe,
+                    run_id=self.run_id,
                 )
             except Exception as e:
                 logger.warning(f"  save_wallet_metrics failed for {metrics.address[:10]}…: {e}")
@@ -152,7 +156,7 @@ class ScalperPoolBuilder:
             }
             for i, (m, s) in enumerate(selected)
         ]
-        db.set_scalper_pool(entries)
+        db.set_scalper_pool(entries, run_id=self.run_id)
 
         return {
             "pool_size": len(selected),

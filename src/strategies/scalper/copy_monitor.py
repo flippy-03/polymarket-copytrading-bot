@@ -3,20 +3,25 @@ Scalper Copy Monitor — polls active titular wallets, detects fresh trades and
 mirrors them proportionally via the scalper_executor.
 
 Close behaviour: when a titular sells out of an asset that we are copying, we
-close our paper trade.
+close our paper trade. On every tick, virtual stop-loss / take-profit is
+evaluated on OPEN shadow trades via the executor.
 """
 import time
+from datetime import datetime, timezone
 
-from src.strategies.common import config as C, db
+from src.strategies.common import clob_exec, config as C, db
 from src.strategies.common.data_client import DataClient
 from src.strategies.scalper.scalper_executor import ScalperExecutor
 from src.utils.logger import logger
 
 
 class ScalperCopyMonitor:
+    STRATEGY = "SCALPER"
+
     def __init__(self):
         self.data = DataClient()
-        self.executor = ScalperExecutor(data=self.data)
+        self.run_id = db.get_active_run(self.STRATEGY)
+        self.executor = ScalperExecutor(data=self.data, run_id=self.run_id)
         self.titulars: set[str] = set()
         self.last_seen: dict[str, int] = {}
 
@@ -25,9 +30,33 @@ class ScalperCopyMonitor:
         self.data.close()
 
     def refresh_titulars(self) -> None:
-        rows = db.list_scalper_pool(status="ACTIVE_TITULAR")
+        rows = db.list_scalper_pool(status="ACTIVE_TITULAR", run_id=self.run_id)
         self.titulars = {r["wallet_address"] for r in rows}
         logger.info(f"ScalperCopyMonitor tracking {len(self.titulars)} titulars")
+
+    def _record_observed(self, wallet: str, trades: list[dict]) -> None:
+        for tr in trades:
+            ts = int(tr.get("timestamp") or 0)
+            traded_at_iso = (
+                datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+            )
+            outcome = (tr.get("outcome") or "").strip()
+            direction = "YES" if outcome.lower().startswith("y") else "NO"
+            db.record_observed_trade(
+                wallet_address=wallet,
+                tx_hash=tr.get("transactionHash") or tr.get("txHash"),
+                traded_at=traded_at_iso,
+                market_polymarket_id=tr.get("conditionId") or "",
+                market_question=tr.get("title") or tr.get("question"),
+                outcome_token_id=tr.get("asset"),
+                outcome_label=outcome,
+                direction=direction,
+                side=(tr.get("side") or "").upper() or None,
+                price=float(tr.get("price") or 0) or None,
+                size=float(tr.get("size") or 0) or None,
+                usdc_size=float(tr.get("usdcSize") or 0) or None,
+                raw=tr,
+            )
 
     def _poll(self, wallet: str) -> list[dict]:
         start = self.last_seen.get(wallet) or (int(time.time()) - 3600)
@@ -40,6 +69,7 @@ class ScalperCopyMonitor:
             mx = max(int(t.get("timestamp") or 0) for t in trades)
             if mx > 0:
                 self.last_seen[wallet] = mx + 1
+        self._record_observed(wallet, trades)
         # Data-api returns newest first; we want chronological order for mirrored execution
         return list(reversed(trades))
 
@@ -53,9 +83,10 @@ class ScalperCopyMonitor:
                 elif side == "SELL":
                     self.executor.mirror_close(wallet, trade)
             time.sleep(0.1)
+        clob_exec.evaluate_shadow_stops(self.STRATEGY, run_id=self.run_id)
 
     def run_forever(self, refresh_every: int = 30) -> None:
-        logger.info("ScalperCopyMonitor starting…")
+        logger.info(f"ScalperCopyMonitor starting… run={self.run_id[:8]}")
         self.refresh_titulars()
         iteration = 0
         while True:

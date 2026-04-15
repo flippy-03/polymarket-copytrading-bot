@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useAutoRefresh } from "@/lib/hooks";
-import { useStrategy } from "@/lib/strategy-context";
+import { ctxQueryString, useStrategy } from "@/lib/strategy-context";
 
 type WalletRow = {
   wallet_address: string;
@@ -34,13 +34,14 @@ type WalletRow = {
 type SortKey = "sharpe" | "pnl30" | "win" | "trades";
 
 export default function WalletsPage() {
-  const { strategy } = useStrategy();
+  const { strategy, runId, shadowMode } = useStrategy();
   const source = strategy === "SCALPER" ? "scalper" : "basket";
   const [sortKey, setSortKey] = useState<SortKey>("sharpe");
+  const ctx = ctxQueryString(strategy, runId, shadowMode);
 
   const fetcher = useCallback(
-    () => fetch(`/api/wallets?source=${source}`).then((r) => r.json()),
-    [source],
+    () => fetch(`/api/wallets?${ctx}&source=${source}`).then((r) => r.json()),
+    [ctx, source],
   );
   const { data, loading } = useAutoRefresh<WalletRow[]>(fetcher, 60000);
 

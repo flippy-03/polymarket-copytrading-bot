@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { resolveRunId } from "@/lib/strategy-param";
 
 export const dynamic = "force-dynamic";
 
-// Returns each active basket with its members and recent consensus signals.
-export async function GET() {
+// Returns each active basket with its members and recent consensus signals
+// scoped to the current BASKET run.
+export async function GET(request: Request) {
+  const runId = await resolveRunId(request, "BASKET");
+
   const { data: baskets, error: basketErr } = await supabase
     .from("baskets")
     .select("id, category, status, consensus_threshold, time_window_hours, max_capital_pct, created_at, updated_at")
@@ -17,20 +21,26 @@ export async function GET() {
 
   const basketIds = (baskets ?? []).map((b) => b.id as string);
 
+  let membersQuery = supabase
+    .from("basket_wallets")
+    .select("basket_id, wallet_address, rank_score, rank_position, entered_at, run_id")
+    .is("exited_at", null)
+    .in("basket_id", basketIds.length ? basketIds : ["__none__"]);
+  if (runId) membersQuery = membersQuery.eq("run_id", runId);
+
+  let signalsQuery = supabase
+    .from("consensus_signals")
+    .select(
+      "id, basket_id, market_polymarket_id, market_question, direction, consensus_pct, wallets_agreeing, wallets_total, status, price_at_signal, created_at, executed_at, run_id",
+    )
+    .in("basket_id", basketIds.length ? basketIds : ["__none__"])
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (runId) signalsQuery = signalsQuery.eq("run_id", runId);
+
   const [{ data: members }, { data: signals }] = await Promise.all([
-    supabase
-      .from("basket_wallets")
-      .select("basket_id, wallet_address, rank_score, rank_position, entered_at")
-      .is("exited_at", null)
-      .in("basket_id", basketIds.length ? basketIds : ["__none__"]),
-    supabase
-      .from("consensus_signals")
-      .select(
-        "id, basket_id, market_polymarket_id, market_question, direction, consensus_pct, wallets_agreeing, wallets_total, status, price_at_signal, created_at, executed_at",
-      )
-      .in("basket_id", basketIds.length ? basketIds : ["__none__"])
-      .order("created_at", { ascending: false })
-      .limit(200),
+    membersQuery,
+    signalsQuery,
   ]);
 
   const membersByBasket = new Map<string, typeof members>();

@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useAutoRefresh, timeAgo } from "@/lib/hooks";
+import { useStrategy } from "@/lib/strategy-context";
 
 type BasketMember = {
   wallet_address: string;
@@ -38,10 +39,13 @@ type Basket = {
 };
 
 export default function BasketsPage() {
-  const fetcher = useCallback(
-    () => fetch("/api/baskets").then((r) => r.json()),
-    [],
-  );
+  const { runId } = useStrategy();
+  const fetcher = useCallback(() => {
+    const params = new URLSearchParams();
+    if (runId) params.set("run_id", runId);
+    const qs = params.toString();
+    return fetch(`/api/baskets${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  }, [runId]);
   const { data, loading } = useAutoRefresh<Basket[]>(fetcher, 30000);
 
   return (

@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useAutoRefresh } from "@/lib/hooks";
-import { useStrategy } from "@/lib/strategy-context";
+import { ctxQueryString, useStrategy } from "@/lib/strategy-context";
 import type { PortfolioState } from "@/lib/types";
 
 const SERVICES_BY_STRATEGY: Record<string, { name: string; desc: string }[]> = {
@@ -18,11 +18,15 @@ const SERVICES_BY_STRATEGY: Record<string, { name: string; desc: string }[]> = {
 };
 
 export default function ServicesPage() {
-  const { strategy } = useStrategy();
+  const { strategy, runId, shadowMode } = useStrategy();
+  const ctx = ctxQueryString(strategy, runId, shadowMode);
 
   const portfolioFetcher = useCallback(
-    () => fetch(`/api/portfolio?strategy=${strategy}`).then((r) => r.json()),
-    [strategy],
+    () =>
+      fetch(`/api/portfolio?${ctx}`)
+        .then((r) => r.json())
+        .then((p) => (p && p.both ? p.real ?? p.shadow : p)),
+    [ctx],
   );
   const { data: portfolio } = useAutoRefresh<PortfolioState>(portfolioFetcher);
 

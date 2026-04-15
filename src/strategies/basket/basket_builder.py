@@ -38,9 +38,12 @@ def _composite_score(m: WalletMetrics) -> float:
 
 
 class BasketBuilder:
+    STRATEGY = "BASKET"
+
     def __init__(self):
         self.gamma = GammaClient()
         self.data = DataClient()
+        self.run_id = db.get_active_run(self.STRATEGY)
 
     def close(self):
         self.gamma.close()
@@ -137,6 +140,7 @@ class BasketBuilder:
                     is_bot=not bool(bot.get("pass", True)),
                     bot_score=int(bot.get("passed") or 0),
                     composite_score=_composite_score(metrics) if ok else None,
+                    run_id=self.run_id,
                 )
             except Exception as e:
                 logger.warning(f"  save_wallet_metrics failed for {metrics.address[:10]}…: {e}")
@@ -175,7 +179,7 @@ class BasketBuilder:
             }
             for i, w in enumerate(selected)
         ]
-        db.replace_basket_wallets(basket_id, payload)
+        db.replace_basket_wallets(basket_id, payload, run_id=self.run_id)
 
         return {
             "basket_id": basket_id,

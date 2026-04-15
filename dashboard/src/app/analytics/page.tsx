@@ -15,7 +15,7 @@ import {
 import KpiCard from "@/components/KpiCard";
 import TimeFilterBar from "@/components/TimeFilter";
 import { formatPnl, formatPct, pnlColor, useAutoRefresh } from "@/lib/hooks";
-import { useStrategy } from "@/lib/strategy-context";
+import { ctxQueryString, useStrategy } from "@/lib/strategy-context";
 import type { TimeFilter } from "@/lib/types";
 
 type StatsResponse = {
@@ -36,12 +36,13 @@ type StatsResponse = {
 };
 
 export default function AnalyticsPage() {
-  const { strategy } = useStrategy();
+  const { strategy, runId, shadowMode } = useStrategy();
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("1m");
+  const ctx = ctxQueryString(strategy, runId, shadowMode);
 
   const statsFetcher = useCallback(
-    () => fetch(`/api/stats?strategy=${strategy}`).then((r) => r.json()),
-    [strategy],
+    () => fetch(`/api/stats?${ctx}`).then((r) => r.json()),
+    [ctx],
   );
   const { data: stats, loading } = useAutoRefresh<StatsResponse>(statsFetcher, 30000);
 

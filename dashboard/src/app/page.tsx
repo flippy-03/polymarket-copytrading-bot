@@ -20,36 +20,42 @@ import {
   timeAgo,
   useAutoRefresh,
 } from "@/lib/hooks";
-import { useStrategy } from "@/lib/strategy-context";
+import { ctxQueryString, useStrategy } from "@/lib/strategy-context";
 import type { PortfolioState, TimeFilter } from "@/lib/types";
 
 export default function DashboardPage() {
-  const { strategy } = useStrategy();
+  const { strategy, runId, shadowMode } = useStrategy();
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("1w");
+  const ctx = ctxQueryString(strategy, runId, shadowMode);
 
   const portfolioFetcher = useCallback(
-    () => fetch(`/api/portfolio?strategy=${strategy}`).then((r) => r.json()),
-    [strategy],
+    () =>
+      fetch(`/api/portfolio?${ctx}`)
+        .then((r) => r.json())
+        .then((p) => (p && p.both ? p.real ?? p.shadow : p)),
+    [ctx],
   );
   const { data: portfolio } = useAutoRefresh<PortfolioState>(portfolioFetcher);
 
   const positionsFetcher = useCallback(
-    () => fetch(`/api/positions?strategy=${strategy}`).then((r) => r.json()),
-    [strategy],
+    () => fetch(`/api/positions?${ctx}`).then((r) => r.json()),
+    [ctx],
   );
   const { data: positions } = useAutoRefresh<Record<string, unknown>[]>(positionsFetcher);
 
   const tradesFetcher = useCallback(() => {
     const since = getDateFromFilter(timeFilter);
-    const params = new URLSearchParams({ strategy, status: "CLOSED", limit: "50" });
+    const params = new URLSearchParams(ctx);
+    params.set("status", "CLOSED");
+    params.set("limit", "50");
     if (since) params.set("since", since);
     return fetch(`/api/trades?${params}`).then((r) => r.json());
-  }, [strategy, timeFilter]);
+  }, [ctx, timeFilter]);
   const { data: trades } = useAutoRefresh<Record<string, unknown>[]>(tradesFetcher);
 
   const allTradesFetcher = useCallback(
-    () => fetch(`/api/trades?strategy=${strategy}&status=CLOSED&limit=500`).then((r) => r.json()),
-    [strategy],
+    () => fetch(`/api/trades?${ctx}&status=CLOSED&limit=500`).then((r) => r.json()),
+    [ctx],
   );
   const { data: rawAllTrades } = useAutoRefresh<Record<string, unknown>[]>(allTradesFetcher);
 

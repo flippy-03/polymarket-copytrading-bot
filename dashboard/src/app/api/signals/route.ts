@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { resolveStrategy } from "@/lib/strategy-param";
+import { resolveRunId, resolveStrategy } from "@/lib/strategy-param";
 
 export const dynamic = "force-dynamic";
 
@@ -10,17 +10,21 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const strategy = resolveStrategy(request);
   if (strategy !== "BASKET") return NextResponse.json([]);
+  const runId = await resolveRunId(request, strategy);
 
   const status = searchParams.get("status") ?? "PENDING";
   const limit = parseInt(searchParams.get("limit") ?? "20");
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("consensus_signals")
     .select("*, baskets(category)")
     .eq("status", status)
     .order("created_at", { ascending: false })
     .limit(limit);
 
+  if (runId) query = query.eq("run_id", runId);
+
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const enriched = (data ?? []).map((s: Record<string, unknown>) => ({

@@ -34,15 +34,18 @@ def _sum_pnl(trades: list[dict], days: int) -> float:
 
 
 class RotationEngine:
+    STRATEGY = "SCALPER"
+
     def __init__(self):
         self.data = DataClient()
+        self.run_id = db.get_active_run(self.STRATEGY)
 
     def close(self):
         self.data.close()
 
     def execute_rotation(self, reason: str = "SCHEDULED_WEEKLY") -> dict:
-        logger.info(f"Scalper rotation: {reason}")
-        pool = db.list_scalper_pool()
+        logger.info(f"Scalper rotation: {reason} (run={self.run_id[:8]})")
+        pool = db.list_scalper_pool(run_id=self.run_id)
         if not pool:
             logger.warning("scalper_pool is empty — cannot rotate")
             return {"new_titulars": [], "removed_titulars": []}
@@ -88,7 +91,7 @@ class RotationEngine:
         new_titulars = eligible[:C.SCALPER_ACTIVE_WALLETS]
 
         # Capital allocation (equal split of scalper portfolio capital)
-        p = db.get_portfolio("SCALPER")
+        p = db.get_portfolio("SCALPER", run_id=self.run_id)
         total_cap = float((p or {}).get("current_capital") or C.SCALPER_INITIAL_CAPITAL)
         per_wallet = round(total_cap / max(len(new_titulars), 1), 2) if new_titulars else 0.0
 
@@ -99,9 +102,9 @@ class RotationEngine:
             if row.get("status") == "QUARANTINE":
                 continue
             if addr in titular_set:
-                db.update_scalper_status(addr, "ACTIVE_TITULAR", capital_usd=per_wallet)
+                db.update_scalper_status(addr, "ACTIVE_TITULAR", capital_usd=per_wallet, run_id=self.run_id)
             else:
-                db.update_scalper_status(addr, "POOL", capital_usd=0)
+                db.update_scalper_status(addr, "POOL", capital_usd=0, run_id=self.run_id)
 
         # Rotation audit row
         new_titulars_payload = [
@@ -117,6 +120,7 @@ class RotationEngine:
                 removed_titulars=removed,
                 new_titulars=new_titulars_payload,
                 pool_snapshot=pool_snapshot,
+                run_id=self.run_id,
             )
         except Exception as e:
             logger.warning(f"insert_rotation failed: {e}")

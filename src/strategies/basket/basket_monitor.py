@@ -16,8 +16,11 @@ from src.utils.logger import logger
 
 
 class BasketMonitor:
+    STRATEGY = "BASKET"
+
     def __init__(self):
         self.data = DataClient()
+        self.run_id = db.get_active_run(self.STRATEGY)
         # engines keyed by basket_id
         self.engines: dict[str, ConsensusEngine] = {}
         self.basket_meta: dict[str, dict] = {}   # basket_id -> {"category": ...}
@@ -36,7 +39,7 @@ class BasketMonitor:
         new_meta: dict[str, dict] = {}
         for b in active:
             bid = b["id"]
-            wallets = db.get_active_basket_wallets(bid)
+            wallets = db.get_active_basket_wallets(bid, run_id=self.run_id)
             if len(wallets) < 2:
                 logger.info(f"Basket {b.get('category')} has <2 wallets, skipping")
                 continue
@@ -60,6 +63,28 @@ class BasketMonitor:
         except Exception as e:
             logger.warning(f"  poll {wallet[:10]}… failed: {e}")
             return []
+        for tr in trades:
+            ts = int(tr.get("timestamp") or 0)
+            traded_at_iso = (
+                datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+            )
+            outcome = (tr.get("outcome") or "").strip()
+            direction = "YES" if outcome.lower().startswith("y") else "NO"
+            db.record_observed_trade(
+                wallet_address=wallet,
+                tx_hash=tr.get("transactionHash") or tr.get("txHash"),
+                traded_at=traded_at_iso,
+                market_polymarket_id=tr.get("conditionId") or "",
+                market_question=tr.get("title") or tr.get("question"),
+                outcome_token_id=tr.get("asset"),
+                outcome_label=outcome,
+                direction=direction,
+                side=(tr.get("side") or "").upper() or None,
+                price=float(tr.get("price") or 0) or None,
+                size=float(tr.get("size") or 0) or None,
+                usdc_size=float(tr.get("usdcSize") or 0) or None,
+                raw=tr,
+            )
         if trades:
             max_ts = max(int(t.get("timestamp") or 0) for t in trades)
             if max_ts > 0:
@@ -105,7 +130,7 @@ class BasketMonitor:
             "price_at_signal": sig.avg_entry_price,
             "status": "PENDING",
         }
-        sid = db.insert_consensus_signal(row)
+        sid = db.insert_consensus_signal(row, run_id=self.run_id)
         logger.info(
             f"[BASKET/{sig.basket_category}] consensus {sig.consensus_pct:.0%} on "
             f"{sig.market_title[:60]!r} → {direction} (signal {sid[:8]})"
