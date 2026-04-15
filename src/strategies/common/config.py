@@ -42,7 +42,7 @@ POSITION_SIZE_RANGE = (100, 10_000)
 TIER2_MIN_PASS = 4
 
 # ── Bot detection ────────────────────────────────────────
-BOT_MIN_TESTS_PASS = 4
+BOT_MIN_TESTS_PASS = 3          # 4 real tests now (corr_delay removed); need 3/4
 BOT_INTERVAL_CV_MIN = 0.30
 BOT_SIZE_CV_MIN = 0.30
 BOT_MAX_CORRELATION_SCORE = 0.70

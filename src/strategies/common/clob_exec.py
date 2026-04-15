@@ -187,7 +187,10 @@ def close_paper_trade(trade_id: str, reason: str) -> None:
         logger.warning(f"close_paper_trade called on shadow {trade_id[:8]} — use close_shadow_trade")
         return
 
-    exit_price = get_token_price(t["outcome_token_id"]) or float(t["entry_price"])
+    exit_price = get_token_price(t["outcome_token_id"])
+    if not exit_price:
+        logger.warning(f"[{t['strategy']}] no CLOB price for {t['outcome_token_id'][:8]}…; deferring close to next cycle")
+        return
     _record_price(t["outcome_token_id"], exit_price, t.get("market_polymarket_id"))
     pnl_usd, pnl_pct = _pnl(float(t["shares"]), float(t["entry_price"]), exit_price, float(t["position_usd"]))
 
@@ -214,7 +217,10 @@ def close_shadow_trade(trade_id: str, reason: str) -> None:
     if t["status"] != "OPEN" or not t.get("is_shadow"):
         return
 
-    exit_price = get_token_price(t["outcome_token_id"]) or float(t["entry_price"])
+    exit_price = get_token_price(t["outcome_token_id"])
+    if not exit_price:
+        logger.warning(f"[{t['strategy']}] no CLOB price for shadow {t['outcome_token_id'][:8]}…; deferring close")
+        return
     _record_price(t["outcome_token_id"], exit_price, t.get("market_polymarket_id"))
     pnl_usd, pnl_pct = _pnl(float(t["shares"]), float(t["entry_price"]), exit_price, float(t["position_usd"]))
 

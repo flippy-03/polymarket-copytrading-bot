@@ -104,9 +104,8 @@ def full_filter_pipeline(m: WalletMetrics) -> tuple[bool, dict]:
     bot_tests += int(ok)
     bot_details.append(f"size_cv={m.size_cv:.2f} {'ok' if ok else 'fail'}")
 
-    # Test 3 (delay correlation) is cross-wallet — evaluated elsewhere. Pass-through here.
-    bot_tests += 1
-    bot_details.append("corr_delay=deferred ok")
+    # Test 3 (delay correlation) is cross-wallet — skipped here, evaluated elsewhere.
+    bot_details.append("corr_delay=deferred (not counted)")
 
     ok = m.unique_markets_pct >= C.BOT_MIN_UNIQUE_MARKETS_PCT
     bot_tests += int(ok)
@@ -119,7 +118,7 @@ def full_filter_pipeline(m: WalletMetrics) -> tuple[bool, dict]:
     bot_ok = bot_tests >= C.BOT_MIN_TESTS_PASS
     report["bot"] = {
         "passed": bot_tests,
-        "of": 5,
+        "of": 4,
         "pass": bot_ok,
         "details": bot_details,
     }

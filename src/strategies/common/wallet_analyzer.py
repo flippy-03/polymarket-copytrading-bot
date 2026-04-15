@@ -105,7 +105,14 @@ def analyze_wallet(trades: list[dict], address: str) -> WalletMetrics:
 
     def _usdc(t):
         try:
-            return float(t.get("usdcSize") or 0)
+            v = t.get("usdcSize")
+            if v is not None:
+                return float(v)
+        except (TypeError, ValueError):
+            pass
+        # Fallback: size * price (used by market /trades endpoint)
+        try:
+            return float(t.get("size") or 0) * float(t.get("price") or 0.5)
         except (TypeError, ValueError):
             return 0.0
 

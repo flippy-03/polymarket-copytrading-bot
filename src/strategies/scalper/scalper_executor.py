@@ -7,6 +7,8 @@ capital share assigned to that titular.
 Every real trade is mirrored by a shadow trade (fixed $100, no risk gating).
 Shadow stops are evaluated on every tick via clob_exec.evaluate_shadow_stops.
 """
+import random
+
 from src.db import supabase_client as _db
 from src.strategies.common import clob_exec, config as C, db
 from src.strategies.common.data_client import DataClient
@@ -32,7 +34,7 @@ class ScalperExecutor:
     # ── sizing ───────────────────────────────────────────
 
     def _copy_size(self, titular_usdc: float) -> float:
-        ratio = (C.SCALPER_COPY_RATIO_MIN + C.SCALPER_COPY_RATIO_MAX) / 2
+        ratio = random.uniform(C.SCALPER_COPY_RATIO_MIN, C.SCALPER_COPY_RATIO_MAX)
         raw = titular_usdc * ratio
         return max(C.SCALPER_MIN_PER_TRADE, min(raw, C.SCALPER_MAX_PER_TRADE))
 
