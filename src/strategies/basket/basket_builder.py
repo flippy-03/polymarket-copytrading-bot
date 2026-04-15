@@ -225,7 +225,6 @@ class BasketBuilder:
             (datetime.datetime.utcnow() - datetime.timedelta(days=120)).timestamp()
         )
         skipped_few_trades = 0
-        skipped_off_category = 0
         for addr in candidates[:C.BASKET_POOL_CANDIDATES]:
             try:
                 trades = self.data.get_all_wallet_trades(addr, start=four_months_ago)
@@ -239,14 +238,14 @@ class BasketBuilder:
                     positions = None
                 metrics = analyze_wallet(trades, addr, positions)
 
-                # Specialist filter: require ≥BASKET_MIN_CATEGORY_PNL_PCT of
-                # total PnL to come from this category's markets.
-                # Uses Polymarket conditionIds (Gamma tags), not keyword matching.
+                # Specialist signal: what fraction of the wallet's PnL came from
+                # this category's known conditionIds. Used as ranking bonus only
+                # (not as a hard filter) because our cids window (~90 markets) is
+                # too small relative to a wallet's 4-month history — a genuine
+                # crypto specialist who traded 300 markets would fail a hard gate.
+                # Discovery from category resolved markets already ensures engagement.
                 cat_pnl = _category_pnl(trades, positions, all_category_cids)
                 cat_pnl_pct = (cat_pnl / metrics.total_pnl) if metrics.total_pnl > 0 else 0.0
-                if cat_pnl_pct < C.BASKET_MIN_CATEGORY_PNL_PCT:
-                    skipped_off_category += 1
-                    continue
 
                 analyzed.append((metrics, trades, positions, cat_pnl_pct))
             except Exception as e:
@@ -255,8 +254,7 @@ class BasketBuilder:
 
         logger.info(
             f"  analyzed: {len(analyzed)} "
-            f"(skipped {skipped_few_trades} <{C.MIN_TRADES_TOTAL} trades, "
-            f"{skipped_off_category} cat_pnl_pct <{C.BASKET_MIN_CATEGORY_PNL_PCT:.0%})"
+            f"(skipped {skipped_few_trades} <{C.MIN_TRADES_TOTAL} trades)"
         )
 
         # Sample log for first 5
