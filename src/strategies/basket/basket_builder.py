@@ -87,12 +87,12 @@ class BasketBuilder:
 
         # ── Step 2: collect candidates from holders ──────
         freq: Counter = Counter()
-        for mkt in target_markets[:15]:
+        for mkt in target_markets[:20]:
             cid = mkt.get("conditionId")
             if not cid:
                 continue
             try:
-                holders = self.data.get_market_holders(cid, limit=30)
+                holders = self.data.get_market_holders(cid, limit=50)
                 for h in holders:
                     addr = h.get("proxyWallet") or h.get("address")
                     if addr:
@@ -101,8 +101,13 @@ class BasketBuilder:
                 logger.warning(f"  holders({cid[:12]}) failed: {e}")
             time.sleep(0.15)
 
-        candidates = [addr for addr, count in freq.most_common(50) if count >= 2]
-        logger.info(f"  candidates with ≥2 market presence: {len(candidates)}")
+        # Prefer wallets seen in ≥2 markets; fall back to any presence if pool is small
+        candidates = [addr for addr, count in freq.most_common(60) if count >= 2]
+        if len(candidates) < 10:
+            candidates = [addr for addr, count in freq.most_common(60) if count >= 1]
+            logger.info(f"  candidates (≥1 market, fallback): {len(candidates)}")
+        else:
+            logger.info(f"  candidates with ≥2 market presence: {len(candidates)}")
 
         # ── Step 3: analyze candidates ───────────────────
         analyzed: list[tuple[WalletMetrics, list[dict]]] = []
