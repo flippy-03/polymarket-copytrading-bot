@@ -307,11 +307,8 @@ class BasketBuilder:
 
         logger.info(f"  passed floor: {len(scored)}/{len(analyzed)}")
         if len(scored) < len(analyzed):
-            from collections import Counter as _C
-            floor_fails = [
-                m.address for m, _, _ in analyzed
-                if not any(m.address == s[0].address for s in scored)
-            ]
+            scored_addrs = {s[0].address for s in scored}
+            floor_fails = [m.address for m, _, _, _ in analyzed if m.address not in scored_addrs]
             logger.info(f"  floor-failed: {len(floor_fails)} wallets")
 
         # ── Step 5: Top-N by composite score ────────────────────────────────
