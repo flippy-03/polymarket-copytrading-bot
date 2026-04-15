@@ -162,6 +162,10 @@ class BasketBuilder:
                         break
 
         logger.info(f"  passed filters: {len(passed)}/{len(analyzed)}")
+        if passed == [] and rejected:
+            from collections import Counter as _C
+            reason_counts = _C(r["reason"] for r in rejected)
+            logger.info(f"  rejection reasons: {dict(reason_counts.most_common(5))}")
 
         # ── Step 5: rank and pick ────────────────────────
         scored = sorted(passed, key=_composite_score, reverse=True)

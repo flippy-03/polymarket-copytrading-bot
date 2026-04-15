@@ -24,13 +24,13 @@ BASKET_INITIAL_CAPITAL = float(os.getenv("BASKET_INITIAL_CAPITAL", "1000"))
 SCALPER_INITIAL_CAPITAL = float(os.getenv("SCALPER_INITIAL_CAPITAL", "1000"))
 
 # ── Tier 1 filters (elimination) ─────────────────────────
-MIN_WIN_RATE = 0.60
-MIN_TRADES_TOTAL = 100
-MIN_TRACK_RECORD_DAYS = 120
-MAX_HOLDING_PERIOD_DAYS = 7
-MIN_TRADES_PER_MONTH = 8
+MIN_WIN_RATE = 0.55               # relaxed 0.60→0.55 for backtest
+MIN_TRADES_TOTAL = 50             # relaxed 100→50 for backtest
+MIN_TRACK_RECORD_DAYS = 60        # relaxed 120→60 for backtest
+MAX_HOLDING_PERIOD_DAYS = 21      # relaxed 7→21; prediction markets resolve over weeks
+MIN_TRADES_PER_MONTH = 4          # relaxed 8→4 for backtest
 REQUIRE_POSITIVE_PNL_30D = True
-REQUIRE_NONNEGATIVE_PNL_7D = True
+REQUIRE_NONNEGATIVE_PNL_7D = False  # relaxed: 7d window too noisy for volatile events
 
 # ── Tier 2 filters (edge quality) ────────────────────────
 MIN_PROFIT_FACTOR = 1.5
