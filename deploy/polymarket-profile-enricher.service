@@ -1,0 +1,20 @@
+[Unit]
+Description=Polymarket Profile Enricher (dual-strategy wallet profiles)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/polymarket-copytrading-bot
+ExecStart=/root/polymarket-copytrading-bot/.venv/bin/python scripts/run_profile_enricher.py --batch-size 3 --interval 90
+EnvironmentFile=/root/polymarket-copytrading-bot/.env
+Environment=PYTHONPATH=/root/polymarket-copytrading-bot
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polymarket-profile-enricher
+
+[Install]
+WantedBy=multi-user.target

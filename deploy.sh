@@ -64,7 +64,7 @@ echo "  deps OK"
 REMOTE
 fi
 
-# ── 4. Instalar unit specialist (si no existe) + restart servicios ───────────
+# ── 4. Instalar units (si no existen) + restart servicios ────────────────────
 if [ "$SETUP" = false ]; then
   echo "▶ [4/5] Instalando/reiniciando servicios Python…"
   ssh "$VPS_HOST" bash <<REMOTE
@@ -77,9 +77,17 @@ if [ ! -f /etc/systemd/system/polymarket-specialist.service ]; then
   systemctl enable polymarket-specialist
   echo "  unit polymarket-specialist instalado y habilitado"
 fi
+# Instalar unit profile-enricher si no existe aún
+if [ ! -f /etc/systemd/system/polymarket-profile-enricher.service ]; then
+  cp deploy/polymarket-profile-enricher.service /etc/systemd/system/polymarket-profile-enricher.service
+  systemctl daemon-reload
+  systemctl enable polymarket-profile-enricher
+  echo "  unit polymarket-profile-enricher instalado y habilitado"
+fi
 # Reiniciar servicios activos
 systemctl restart polymarket-scalper 2>/dev/null && echo "  polymarket-scalper restarted" || echo "  polymarket-scalper: no instalado"
 systemctl restart polymarket-specialist 2>/dev/null && echo "  polymarket-specialist restarted" || echo "  polymarket-specialist: no instalado"
+systemctl restart polymarket-profile-enricher 2>/dev/null && echo "  polymarket-profile-enricher restarted" || echo "  polymarket-profile-enricher: no instalado"
 REMOTE
 fi
 
@@ -96,7 +104,7 @@ REMOTE
 echo ""
 echo "✓ Deploy completo. Estado de servicios:"
 ssh "$VPS_HOST" bash <<'STATUS'
-for svc in polymarket-scalper polymarket-specialist; do
+for svc in polymarket-scalper polymarket-specialist polymarket-profile-enricher; do
   if systemctl is-active --quiet "$svc" 2>/dev/null; then
     echo "  ✓ $svc: running"
   else
@@ -117,5 +125,5 @@ STATUS
 if [ "$SHOW_LOGS" = true ]; then
   echo ""
   echo "── logs (Ctrl+C para salir) ─────────────────────────────────────────────"
-  ssh "$VPS_HOST" "journalctl -u polymarket-scalper -u polymarket-specialist -f --output=cat"
+  ssh "$VPS_HOST" "journalctl -u polymarket-scalper -u polymarket-specialist -u polymarket-profile-enricher -f --output=cat"
 fi

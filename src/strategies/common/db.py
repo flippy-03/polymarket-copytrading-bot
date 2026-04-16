@@ -643,3 +643,118 @@ def get_copy_trade(trade_id: str) -> dict | None:
     except Exception as e:
         logger.warning(f"get_copy_trade {trade_id[:8]}: {e}")
         return None
+
+
+# ── wallet_profiles (enriched dual-strategy wallet fichas) ────────────────────
+# Written by the profile_enricher daemon (src/strategies/common/profile_enricher).
+# Read by the dashboard /wallets page and (future) specialist_analyzer scoring.
+# The table is agnostic of strategy: a wallet may appear in spec_ranking,
+# scalper_pool, or both — strategies_active holds the context.
+
+def upsert_wallet_profile(profile: dict) -> None:
+    """Upsert a full wallet profile row. `profile` must contain `wallet`."""
+    if not profile.get("wallet"):
+        raise ValueError("upsert_wallet_profile: profile missing wallet")
+    try:
+        _db.upsert("wallet_profiles", profile, on_conflict="wallet")
+    except Exception as e:
+        logger.warning(f"upsert_wallet_profile {profile['wallet'][:10]}…: {e}")
+
+
+def get_wallet_profile(wallet: str) -> dict | None:
+    client = _db.get_client()
+    try:
+        result = (
+            client.table("wallet_profiles")
+            .select("*")
+            .eq("wallet", wallet)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.debug(f"get_wallet_profile {wallet[:10]}: {e}")
+        return None
+
+
+def list_wallet_profiles(
+    strategy: Optional[str] = None,
+    limit: int = 50,
+    order_by: str = "priority_score",
+    desc: bool = True,
+) -> list[dict]:
+    """List enriched wallet profiles, optionally filtered by strategy.
+
+    `strategy` matches against the TEXT[] column `strategies_active` via
+    PostgREST's `cs` (contains) operator.
+    """
+    client = _db.get_client()
+    q = client.table("wallet_profiles").select("*")
+    if strategy:
+        # PostgREST array containment: strategies_active @> '{SPECIALIST}'
+        q = q.contains("strategies_active", [strategy])
+    q = q.order(order_by, desc=desc).limit(limit)
+    try:
+        return q.execute().data or []
+    except Exception as e:
+        logger.warning(f"list_wallet_profiles strategy={strategy}: {e}")
+        return []
+
+
+def list_stale_wallet_profiles(
+    stale_after_days: int = 7, batch_size: int = 20
+) -> list[dict]:
+    """Return wallets whose profile was enriched more than `stale_after_days`
+    ago. Used by the enricher to pick next refresh candidates."""
+    client = _db.get_client()
+    cutoff = int(datetime.now(tz=timezone.utc).timestamp()) - stale_after_days * 86400
+    try:
+        return (
+            client.table("wallet_profiles")
+            .select("wallet, enriched_at, priority_score, strategies_active")
+            .lt("enriched_at", cutoff)
+            .order("enriched_at", desc=False)  # oldest first
+            .limit(batch_size)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.warning(f"list_stale_wallet_profiles: {e}")
+        return []
+
+
+def list_spec_ranking_addresses(run_id: Optional[str] = None) -> list[dict]:
+    """Return `{wallet, universe, specialist_score, last_active_ts, is_bot}` for
+    every specialist in spec_ranking. If run_id is given, only that run's rows.
+    The enricher dedupes by wallet (keeping the highest specialist_score per wallet)."""
+    client = _db.get_client()
+    q = (
+        client.table("spec_ranking")
+        .select("wallet, universe, specialist_score, last_active_ts, is_bot")
+    )
+    if run_id:
+        q = q.eq("run_id", run_id)
+    try:
+        return q.execute().data or []
+    except Exception as e:
+        logger.warning(f"list_spec_ranking_addresses: {e}")
+        return []
+
+
+def list_scalper_pool_addresses(run_id: str) -> list[dict]:
+    """Return `{wallet_address, rank_position, status, sharpe_14d}` for the
+    current scalper pool (run scoped)."""
+    client = _db.get_client()
+    try:
+        return (
+            client.table("scalper_pool")
+            .select("wallet_address, rank_position, status, sharpe_14d")
+            .eq("run_id", run_id)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.warning(f"list_scalper_pool_addresses: {e}")
+        return []
