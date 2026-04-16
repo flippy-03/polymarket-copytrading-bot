@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 const POSITION_COLUMNS =
   "id,strategy,run_id,source_wallet,market_polymarket_id,market_question," +
-  "direction,outcome_token_id,entry_price,position_usd,opened_at,is_shadow";
+  "direction,outcome_token_id,entry_price,position_usd,opened_at,is_shadow,metadata";
 
 export async function GET(request: Request) {
   const strategy = resolveStrategy(request);

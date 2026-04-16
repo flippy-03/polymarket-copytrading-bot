@@ -353,43 +353,114 @@ export default function DashboardPage() {
               >
                 <th className="text-left px-5 py-2 font-medium">Market</th>
                 <th className="text-center px-3 py-2 font-medium">Side</th>
+                {shadowMode === "BOTH" && (
+                  <th className="text-center px-3 py-2 font-medium">Type</th>
+                )}
+                <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
+                <th className="text-right px-3 py-2 font-medium">SL / TP</th>
                 <th className="text-right px-3 py-2 font-medium">Size</th>
                 <th className="text-right px-5 py-2 font-medium">Held</th>
               </tr>
             </thead>
             <tbody>
-              {(positions ?? []).map((p) => (
-                <tr key={String(p.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
-                  <td className="px-5 py-2.5 max-w-64 truncate" title={String(p.market_question ?? "")}>
-                    {String(p.market_question ?? "")}
-                  </td>
-                  <td className="text-center px-3 py-2.5">
-                    <span
-                      className="px-2 py-0.5 rounded text-xs font-bold"
-                      style={{
-                        background:
-                          p.direction === "YES" ? "var(--green-dim)" : "var(--red-dim)",
-                        color: p.direction === "YES" ? "var(--green)" : "var(--red)",
-                      }}
-                    >
-                      {String(p.direction ?? "")}
-                    </span>
-                  </td>
-                  <td className="text-right px-3 py-2.5">
-                    ${Number(p.entry_price ?? 0).toFixed(3)}
-                  </td>
-                  <td className="text-right px-3 py-2.5">
-                    ${Number(p.position_usd ?? 0).toFixed(2)}
-                  </td>
-                  <td className="text-right px-5 py-2.5" style={{ color: "var(--text-secondary)" }}>
-                    {timeAgo(p.opened_at as string)}
-                  </td>
-                </tr>
-              ))}
+              {(positions ?? []).map((p) => {
+                const meta = (p.metadata ?? {}) as Record<string, unknown>;
+                const quality = String(meta.signal_quality ?? "");
+                const universe = String(meta.universe ?? "");
+                const isShadow = p.is_shadow === true;
+                const entry = Number(p.entry_price ?? 0);
+                const sl = entry > 0 ? entry * 0.85 : null;
+                const tp = entry > 0 ? entry * 1.20 : null;
+                const trailingActive = meta.trailing_active === true;
+                const hwm = meta.high_water_mark != null ? Number(meta.high_water_mark) : null;
+                return (
+                  <tr key={String(p.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
+                    <td className="px-5 py-2.5 max-w-56 truncate" title={String(p.market_question ?? "")}>
+                      {String(p.market_question ?? "")}
+                    </td>
+                    <td className="text-center px-3 py-2.5">
+                      <span
+                        className="px-2 py-0.5 rounded text-xs font-bold"
+                        style={{
+                          background: p.direction === "YES" ? "var(--green-dim)" : "var(--red-dim)",
+                          color: p.direction === "YES" ? "var(--green)" : "var(--red)",
+                        }}
+                      >
+                        {String(p.direction ?? "")}
+                      </span>
+                    </td>
+                    {shadowMode === "BOTH" && (
+                      <td className="text-center px-3 py-2.5">
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-bold"
+                          style={
+                            isShadow
+                              ? { background: "#ffffff18", color: "var(--text-secondary)" }
+                              : { background: "#3b82f622", color: "#3b82f6" }
+                          }
+                        >
+                          {isShadow ? "SHADOW" : "REAL"}
+                        </span>
+                      </td>
+                    )}
+                    <td className="text-center px-3 py-2.5">
+                      {quality ? (
+                        <span title={universe}>
+                          <span
+                            className="px-1.5 py-0.5 rounded text-xs font-bold"
+                            style={
+                              quality === "CLEAN"
+                                ? { background: "var(--green-dim)", color: "var(--green)" }
+                                : quality === "CONTESTED"
+                                ? { background: "#ffd93d22", color: "var(--yellow)" }
+                                : { background: "var(--bg-secondary)", color: "var(--text-secondary)" }
+                            }
+                          >
+                            {quality}
+                          </span>
+                          {universe && (
+                            <span className="ml-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+                              {universe.replace(/_/g, " ")}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-3 py-2.5">
+                      ${entry.toFixed(3)}
+                    </td>
+                    <td className="text-right px-3 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
+                      {isShadow && sl != null && tp != null ? (
+                        <span>
+                          <span style={{ color: "var(--red)" }}>${sl.toFixed(3)}</span>
+                          {" / "}
+                          <span style={{ color: "var(--green)" }}>${tp.toFixed(3)}</span>
+                        </span>
+                      ) : !isShadow && hwm != null ? (
+                        <span title="trailing stop active · high-water mark">
+                          {trailingActive
+                            ? <span style={{ color: "var(--green)" }}>trail ↑${hwm.toFixed(3)}</span>
+                            : <span>hwm ${hwm.toFixed(3)}</span>}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="text-right px-3 py-2.5">
+                      ${Number(p.position_usd ?? 0).toFixed(2)}
+                    </td>
+                    <td className="text-right px-5 py-2.5" style={{ color: "var(--text-secondary)" }}>
+                      {timeAgo(p.opened_at as string)}
+                    </td>
+                  </tr>
+                );
+              })}
               {(positions ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td colSpan={shadowMode === "BOTH" ? 8 : 7} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
                     No open positions
                   </td>
                 </tr>
@@ -399,11 +470,14 @@ export default function DashboardPage() {
         </div>
         {positions && positions.length > 0 && (
           <div
-            className="px-5 py-2.5 border-t flex justify-end text-sm font-medium"
-            style={{ borderColor: "var(--border)" }}
+            className="px-5 py-2.5 border-t flex justify-between items-center text-xs"
+            style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
           >
-            <span style={{ color: "var(--text-secondary)" }}>Total Unrealized:&nbsp;</span>
-            <span style={{ color: pnlColor(totalUnrealized) }}>{formatPnl(totalUnrealized)}</span>
+            <span>Unrealized P&L updates when positions close · SL/TP shown are fixed stops for shadow trades</span>
+            <span className="text-sm font-medium">
+              <span>Total Unrealized:&nbsp;</span>
+              <span style={{ color: pnlColor(totalUnrealized) }}>{formatPnl(totalUnrealized)}</span>
+            </span>
           </div>
         )}
       </div>
@@ -422,6 +496,9 @@ export default function DashboardPage() {
                 <th className="text-left px-5 py-2 font-medium">Date</th>
                 <th className="text-left px-3 py-2 font-medium">Market</th>
                 <th className="text-center px-3 py-2 font-medium">Side</th>
+                {shadowMode === "BOTH" && (
+                  <th className="text-center px-3 py-2 font-medium">Type</th>
+                )}
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
                 <th className="text-right px-3 py-2 font-medium">Exit</th>
                 <th className="text-right px-3 py-2 font-medium">P&L</th>
@@ -432,6 +509,7 @@ export default function DashboardPage() {
             <tbody>
               {(trades ?? []).map((t) => {
                 const stamp = (t.closed_at as string) ?? (t.opened_at as string) ?? "";
+                const isShadow = t.is_shadow === true;
                 return (
                   <tr key={String(t.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
                     <td
@@ -455,6 +533,20 @@ export default function DashboardPage() {
                         {String(t.direction ?? "")}
                       </span>
                     </td>
+                    {shadowMode === "BOTH" && (
+                      <td className="text-center px-3 py-2.5">
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-bold"
+                          style={
+                            isShadow
+                              ? { background: "#ffffff18", color: "var(--text-secondary)" }
+                              : { background: "#3b82f622", color: "#3b82f6" }
+                          }
+                        >
+                          {isShadow ? "SHADOW" : "REAL"}
+                        </span>
+                      </td>
+                    )}
                     <td className="text-right px-3 py-2.5">
                       ${Number(t.entry_price ?? 0).toFixed(3)}
                     </td>
@@ -484,7 +576,7 @@ export default function DashboardPage() {
               })}
               {(trades ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td colSpan={shadowMode === "BOTH" ? 9 : 8} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
                     No trades in this period
                   </td>
                 </tr>
