@@ -61,7 +61,7 @@ class DataClient:
         self,
         wallet: str,
         start: Optional[int] = None,
-        max_pages: int = 20,
+        max_pages: int = 7,  # Polymarket Data API rejects offset > 3000 with 400
     ) -> list[dict]:
         all_trades: list[dict] = []
         offset = 0
@@ -104,12 +104,16 @@ class DataClient:
     # ── Market holders & trades ─────────────────────────
 
     def get_market_holders(self, condition_id: str, limit: int = 50) -> list[dict]:
-        # Data API uses "market" param; response is [{token, holders: [...]}, ...]
+        # Data API uses "market" param; response is [{tokenId, holders: [...]}, ...]
+        # We inject _token_id into each holder so callers can assign YES/NO side.
         params = {"market": condition_id, "limit": limit}
         tokens = self._get("/holders", params) or []
         holders: list[dict] = []
         for token_obj in tokens:
-            holders.extend(token_obj.get("holders") or [])
+            token_id = token_obj.get("tokenId") or token_obj.get("token_id")
+            for holder in token_obj.get("holders") or []:
+                holder["_token_id"] = token_id
+                holders.append(holder)
         return holders
 
     def get_market_trades(self, condition_id: str, limit: int = 500) -> list[dict]:

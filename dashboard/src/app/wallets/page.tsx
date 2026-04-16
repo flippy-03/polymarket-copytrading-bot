@@ -24,10 +24,11 @@ type WalletRow = {
     rank_position?: number | null;
     capital_allocated_usd?: number | null;
   };
-  basket?: {
-    basket_id?: string;
+  specialist?: {
+    wallet?: string;
+    universe?: string | null;
     rank_position?: number | null;
-    rank_score?: number | null;
+    specialist_score?: number | null;
   };
 };
 
@@ -35,7 +36,7 @@ type SortKey = "sharpe" | "pnl30" | "win" | "trades";
 
 export default function WalletsPage() {
   const { strategy, runId, shadowMode } = useStrategy();
-  const source = strategy === "SCALPER" ? "scalper" : "basket";
+  const source = strategy === "SCALPER" ? "scalper" : "specialist";
   const [sortKey, setSortKey] = useState<SortKey>("sharpe");
   const ctx = ctxQueryString(strategy, runId, shadowMode);
 
@@ -61,12 +62,12 @@ export default function WalletsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">
-            {strategy === "SCALPER" ? "Scalper Pool" : "Basket Wallets"}
+            {strategy === "SCALPER" ? "Scalper Pool" : "Specialist Rankings"}
           </h2>
           <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
             {strategy === "SCALPER"
               ? "8-12 traders ranked by 14d Sharpe, rotated weekly"
-              : "Crypto / Economics / Politics basket members"}
+              : "Top specialists across universes: crypto, sports"}
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -114,7 +115,7 @@ export default function WalletsPage() {
           <code>
             {strategy === "SCALPER"
               ? "run_scalper_strategy.py --build-pool"
-              : "run_basket_strategy.py --build-only"}
+              : "run_specialist_strategy.py --bootstrap"}
           </code>
           .
         </div>
@@ -140,7 +141,7 @@ export default function WalletsPage() {
                   </>
                 ) : (
                   <>
-                    <th className="p-3">Basket</th>
+                    <th className="p-3">Universe</th>
                     <th className="p-3">Rank</th>
                     <th className="p-3">Score</th>
                   </>
@@ -186,13 +187,13 @@ export default function WalletsPage() {
                     </>
                   ) : (
                     <>
-                      <td className="p-3 font-mono">
-                        {r.basket?.basket_id?.slice(0, 8) ?? "—"}
-                      </td>
-                      <td className="p-3">{r.basket?.rank_position ?? "—"}</td>
                       <td className="p-3">
-                        {r.basket?.rank_score != null
-                          ? r.basket.rank_score.toFixed(2)
+                        {r.specialist?.universe ?? "—"}
+                      </td>
+                      <td className="p-3">{r.specialist?.rank_position ?? "—"}</td>
+                      <td className="p-3">
+                        {r.specialist?.specialist_score != null
+                          ? r.specialist.specialist_score.toFixed(3)
                           : "—"}
                       </td>
                     </>

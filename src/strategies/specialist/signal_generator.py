@@ -107,7 +107,8 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
         ratio = dominant.count / opposition.count
         conflict_penalty = C.SIGNAL_CONFLICT_PENALTY
     else:
-        ratio = float(dominant.count)  # No opposition
+        # Uncontested — cap at 2×CLEAN threshold so the signal is always CLEAN
+        ratio = C.SIGNAL_CLEAN_RATIO * 2
         conflict_penalty = 0.0
 
     # Quality classification

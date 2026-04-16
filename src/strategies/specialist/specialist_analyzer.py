@@ -146,7 +146,7 @@ class SpecialistAnalyzer:
             unknowns = [
                 addr for addr in holder_addrs
                 if addr and addr not in known_map
-            ][:30]  # Cap scan at 30 unknowns
+            ][:C.SPEC_MAX_UNKNOWNS_PER_MARKET]  # Cap scan to keep tick time bounded
 
             for addr in unknowns:
                 try:
@@ -186,7 +186,7 @@ class SpecialistAnalyzer:
 
         for addr, spec_data in holders_who_are_known.items():
             holder_info = holder_addrs.get(addr, {})
-            token_id = holder_info.get("token_id") or holder_info.get("tokenId")
+            token_id = holder_info.get("_token_id") or holder_info.get("token_id") or holder_info.get("tokenId")
             if yes_token_id and token_id == yes_token_id:
                 yes_specialists.append(spec_data)
                 record_market_seen(addr, universe, cid, "YES")

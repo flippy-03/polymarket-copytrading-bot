@@ -214,22 +214,24 @@ def count_ranking(universe: str) -> int:
 def _renumber_positions(universe: str) -> None:
     """
     Update rank_position (1..N) by specialist_score DESC for a universe.
-    Called after every upsert to keep positions fresh.
+    Only updates rows whose rank_position has actually changed, so in steady-state
+    (no new profiles, no score changes) this sends 0 queries after the SELECT.
     """
     client = _db.get_client()
     try:
         rows = (
             client.table("spec_ranking")
-            .select("wallet, universe")
+            .select("wallet, rank_position")
             .eq("universe", universe)
             .order("specialist_score", desc=True)
             .execute()
             .data
         )
         for i, row in enumerate(rows, start=1):
-            client.table("spec_ranking").update({"rank_position": i}).eq(
-                "wallet", row["wallet"]
-            ).eq("universe", row["universe"]).execute()
+            if row.get("rank_position") != i:
+                client.table("spec_ranking").update({"rank_position": i}).eq(
+                    "wallet", row["wallet"]
+                ).eq("universe", universe).execute()
     except Exception as e:
         logger.debug(f"  _renumber_positions({universe}): {e}")
 

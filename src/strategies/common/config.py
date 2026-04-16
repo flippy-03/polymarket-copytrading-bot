@@ -145,6 +145,7 @@ HYBRID_BD_ONLY_MIN_KNOWN = 3        # Use DB-only when >=3 known specialists
 HYBRID_BD_ONLY_MIN_HR = 0.60        # All known must have HR >= 60%
 HYBRID_BD_ONLY_MAX_AGE_HOURS = 12   # Data fresh (< 12h)
 ANTI_BLINDNESS_FORCE_SCAN_EVERY = 10  # Force FULL_SCAN every N BD-only decisions
+SPEC_MAX_UNKNOWNS_PER_MARKET = 10   # Max unknown holders to profile per market (caps tick time)
 
 # Type rankings (spec §6)
 TYPE_MIN_SPECIALISTS_TO_RANK = 3    # Need >=3 specialists before ranking type

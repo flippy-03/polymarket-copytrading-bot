@@ -10,7 +10,7 @@ type UniverseSummary = {
   max_slots: number;
   open_slots: number;
   capital_used: number;
-  unrealized_pnl: number;
+  unrealized_pnl: number | null;
   specialists_known: number;
 };
 

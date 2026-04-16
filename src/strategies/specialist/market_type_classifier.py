@@ -98,8 +98,11 @@ def classify(market: dict) -> str:
     Uses (in order): question, slug, eventSlug, eventTitle.
     Returns 'other' if no pattern matches.
     """
+    # Activity API dicts use "title" instead of "question"; Gamma dicts use "question".
+    # We fall back to "title" so the classifier works in both contexts.
+    question_or_title = market.get("question") or market.get("title") or ""
     text = " ".join(filter(None, [
-        market.get("question") or "",
+        question_or_title,
         market.get("slug") or "",
         market.get("eventSlug") or "",
         market.get("eventTitle") or "",

@@ -9,26 +9,29 @@ export async function GET(request: Request) {
   const runId = await resolveRunId(request, strategy);
 
   // Open positions per universe (from copy_trades metadata.universe)
-  const { data: openTrades } = await supabase
+  // Note: pnl_usd is NULL for OPEN trades — unrealized_pnl cannot be computed
+  // server-side without live CLOB prices; we return null for honest display.
+  let openTradesQuery = supabase
     .from("copy_trades")
-    .select("metadata, position_usd, pnl_usd")
+    .select("metadata, position_usd")
     .eq("strategy", "SPECIALIST")
     .eq("status", "OPEN")
     .eq("is_shadow", false);
+  if (runId) openTradesQuery = openTradesQuery.eq("run_id", runId);
+  const { data: openTrades } = await openTradesQuery;
 
   const universeSummary: Record<
     string,
-    { open: number; capital_used: number; unrealized_pnl: number }
+    { open: number; capital_used: number }
   > = {};
 
   for (const t of openTrades ?? []) {
     const universe = (t.metadata as Record<string, unknown>)?.universe as string ?? "unknown";
     if (!universeSummary[universe]) {
-      universeSummary[universe] = { open: 0, capital_used: 0, unrealized_pnl: 0 };
+      universeSummary[universe] = { open: 0, capital_used: 0 };
     }
     universeSummary[universe].open += 1;
     universeSummary[universe].capital_used += Number(t.position_usd ?? 0);
-    universeSummary[universe].unrealized_pnl += Number(t.pnl_usd ?? 0);
   }
 
   // Specialist counts per universe from spec_ranking
@@ -56,7 +59,7 @@ export async function GET(request: Request) {
     max_slots: cfg.max_slots,
     open_slots: universeSummary[universe]?.open ?? 0,
     capital_used: universeSummary[universe]?.capital_used ?? 0,
-    unrealized_pnl: universeSummary[universe]?.unrealized_pnl ?? 0,
+    unrealized_pnl: null,  // Cannot compute without live CLOB prices
     specialists_known: specialistCounts[universe] ?? 0,
   }));
 

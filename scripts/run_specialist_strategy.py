@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.strategies.common import config as C, db
+from src.strategies.common.clob_exec import evaluate_shadow_stops
 from src.strategies.common.data_client import DataClient
 from src.strategies.common.gamma_client import GammaClient
 from src.strategies.specialist.ranking_db import upsert_profile
@@ -151,6 +152,14 @@ def _run(run_id: str) -> None:
                 except Exception as e:
                     logger.warning(f"Type rankings recompute failed: {e}")
                 last_type_recompute = tick_start
+
+            # Evaluate shadow stops before main tick
+            try:
+                frozen = evaluate_shadow_stops(STRATEGY, run_id=run_id)
+                if frozen:
+                    logger.info(f"Shadow stops frozen this tick: {frozen}")
+            except Exception as e:
+                logger.warning(f"evaluate_shadow_stops failed: {e}")
 
             # Main tick
             try:
