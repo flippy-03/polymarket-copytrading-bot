@@ -88,6 +88,68 @@ SCALPER_ROTATION_HOUR_UTC = 0
 SCALPER_CONSECUTIVE_LOSS_LIMIT = 3
 SCALPER_MONITOR_INTERVAL_SECONDS = 30
 
+# ── Specialist Edge strategy ─────────────────────────────
+SPECIALIST_INITIAL_CAPITAL = float(os.getenv("SPECIALIST_INITIAL_CAPITAL", "1000"))
+
+# Universes: name → {capital_pct, max_slots, market_types}
+SPECIALIST_UNIVERSES = {
+    "crypto_above_below": {
+        "capital_pct": 0.40,
+        "max_slots": 3,
+        "market_types": ["crypto_above", "crypto_below"],
+    },
+    "crypto_price_range": {
+        "capital_pct": 0.30,
+        "max_slots": 2,
+        "market_types": ["crypto_price_range"],
+    },
+    "sports_game_winner": {
+        "capital_pct": 0.30,
+        "max_slots": 2,
+        "market_types": ["sports_winner"],
+    },
+}
+
+# Specialist detection thresholds
+SPEC_MIN_UNIVERSE_TRADES = 10       # Min resolved trades in universe
+SPEC_MIN_HIT_RATE = 0.58            # Min hit rate to qualify
+SPEC_MIN_SCORE = 0.35               # Min specialist_score
+SPEC_MAX_INACTIVE_DAYS = 14         # Must have been active within 14 days
+SPEC_MAX_RANKING_SIZE = 200         # Max specialists per universe in DB
+
+# Signal quality thresholds (spec §8)
+SIGNAL_CLEAN_RATIO = 2.5            # specialists_for / specialists_against >= 2.5
+SIGNAL_CONTESTED_RATIO = 1.5        # ratio >= 1.5 but < 2.5
+SIGNAL_MIN_SPECIALISTS = 2          # At least 2 known specialists on winning side
+SIGNAL_CONFLICT_PENALTY = 0.30      # Penalty when both sides have specialists
+
+# Market filtering for routing
+SPECIALIST_MARKET_MIN_VOLUME_24H = 50_000  # $50K min 24h volume
+SPECIALIST_MARKET_MAX_HOURS = 24    # Only <=24h markets
+SPECIALIST_MARKET_MIN_PRICE = 0.12  # Min token price (avoid near-certain)
+SPECIALIST_MARKET_MAX_PRICE = 0.88  # Max token price
+SPECIALIST_MARKET_MAX_SPREAD = 0.06 # Max bid-ask spread
+
+# Trade sizing
+SPECIALIST_TRADE_PCT = 0.40         # 40% of universe capital per trade
+SPECIALIST_MAX_TRADE_USD = 200      # Cap per trade
+SPECIALIST_MIN_TRADE_USD = 10       # Floor per trade
+
+# Trailing stop (spec §10)
+TS_ACTIVATION = 0.08                # Activate trailing after +8% gain
+TS_TRAIL_PCT = 0.15                 # Trail 15% below high-water mark
+TS_HARD_STOP = -0.20                # Hard stop at -20%
+
+# Routing
+HYBRID_BD_ONLY_MIN_KNOWN = 3        # Use DB-only when >=3 known specialists
+HYBRID_BD_ONLY_MIN_HR = 0.60        # All known must have HR >= 60%
+HYBRID_BD_ONLY_MAX_AGE_HOURS = 12   # Data fresh (< 12h)
+ANTI_BLINDNESS_FORCE_SCAN_EVERY = 10  # Force FULL_SCAN every N BD-only decisions
+
+# Type rankings (spec §6)
+TYPE_MIN_SPECIALISTS_TO_RANK = 3    # Need >=3 specialists before ranking type
+TYPE_RECOMPUTE_INTERVAL_HOURS = 6   # Recompute type rankings every 6h
+
 # ── Quarantine ───────────────────────────────────────────
 QUARANTINE_BOT_DAYS = 30
 QUARANTINE_LOSS_DAYS = 14

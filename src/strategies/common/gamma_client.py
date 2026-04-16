@@ -167,6 +167,22 @@ class GammaClient:
     def get_market_by_id(self, market_id: int) -> dict:
         return self._get(f"/markets/{market_id}")
 
+    def get_market(self, condition_id: str) -> dict | None:
+        """
+        Fetch a market by conditionId.
+        Returns market dict with 'closed' and 'endDate' fields, or None on error.
+        Used by position_manager to detect resolution.
+        """
+        try:
+            params = {"condition_id": condition_id}
+            results = self._get("/markets", params) or []
+            if isinstance(results, list) and results:
+                return results[0]
+            return results if isinstance(results, dict) else None
+        except Exception as e:
+            logger.debug(f"get_market({condition_id[:12]}…): {e}")
+            return None
+
     def close(self):
         self._client.close()
 

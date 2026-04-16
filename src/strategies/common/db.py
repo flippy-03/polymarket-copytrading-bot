@@ -592,3 +592,43 @@ def record_position_snapshot(
         )
     except Exception as e:
         logger.debug(f"record_position_snapshot: {e}")
+
+
+# ── Specialist Edge helpers ──────────────────────────────
+
+def update_copy_trade_metadata(trade_id: str, metadata: dict) -> None:
+    """
+    Merge new keys into copy_trades.metadata JSON column.
+    Used by position_manager to persist trailing stop state.
+    """
+    client = _db.get_client()
+    try:
+        existing = (
+            client.table("copy_trades")
+            .select("metadata")
+            .eq("id", trade_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        current = (existing[0].get("metadata") or {}) if existing else {}
+        merged = {**current, **metadata}
+        client.table("copy_trades").update({"metadata": merged}).eq("id", trade_id).execute()
+    except Exception as e:
+        logger.warning(f"update_copy_trade_metadata {trade_id[:8]}: {e}")
+
+
+def get_copy_trade(trade_id: str) -> dict | None:
+    client = _db.get_client()
+    try:
+        result = (
+            client.table("copy_trades")
+            .select("*")
+            .eq("id", trade_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.warning(f"get_copy_trade {trade_id[:8]}: {e}")
+        return None

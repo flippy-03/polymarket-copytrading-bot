@@ -1,12 +1,12 @@
 import { supabase } from "@/lib/supabase";
 
-export type Strategy = "BASKET" | "SCALPER";
+export type Strategy = "SPECIALIST" | "SCALPER";
 export type ShadowMode = "REAL" | "SHADOW" | "BOTH";
 
 export function resolveStrategy(request: Request): Strategy {
   const { searchParams } = new URL(request.url);
   const raw = (searchParams.get("strategy") || "").toUpperCase();
-  return raw === "SCALPER" ? "SCALPER" : "BASKET";
+  return raw === "SCALPER" ? "SCALPER" : "SPECIALIST";
 }
 
 export function resolveShadowMode(request: Request): ShadowMode {
