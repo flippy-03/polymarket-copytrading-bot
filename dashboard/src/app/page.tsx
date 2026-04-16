@@ -259,11 +259,11 @@ export default function DashboardPage() {
             color="blue"
           />
           <KpiCard
-            label="Total P&L"
+            label="Realized P&L"
             value={formatPnl(Number(portfolio.total_pnl ?? 0))}
             subValue={
               initial > 0
-                ? `${formatPct((Number(portfolio.total_pnl ?? 0) / initial) * 100)} realized`
+                ? `${formatPct((Number(portfolio.total_pnl ?? 0) / initial) * 100)} of capital`
                 : ""
             }
             color={Number(portfolio.total_pnl ?? 0) >= 0 ? "green" : "red"}
@@ -359,7 +359,7 @@ export default function DashboardPage() {
                 <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
                 <th className="text-right px-3 py-2 font-medium">SL / TP</th>
-                <th className="text-right px-3 py-2 font-medium">P&L</th>
+                <th className="text-right px-3 py-2 font-medium">Unrealized</th>
                 <th className="text-right px-3 py-2 font-medium">Size</th>
                 <th className="text-right px-5 py-2 font-medium">Held</th>
               </tr>
@@ -483,7 +483,7 @@ export default function DashboardPage() {
             className="px-5 py-2.5 border-t flex justify-between items-center text-xs"
             style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
           >
-            <span>P&L fetched live from CLOB · SL/TP are fixed stops for shadow trades</span>
+            <span>Unrealized P&L fetched live from CLOB · SL/TP are fixed stops for shadow trades</span>
             <span className="text-sm font-medium">
               <span>Total Unrealized:&nbsp;</span>
               <span style={{ color: pnlColor(totalUnrealized) }}>{formatPnl(totalUnrealized)}</span>
