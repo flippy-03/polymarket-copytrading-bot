@@ -9,6 +9,7 @@ universe_capital = total_capital * UNIVERSES[universe].capital_pct
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from src.strategies.common import config as C
@@ -29,7 +30,8 @@ def execute_signal(
     Execute a Signal as a paper trade. Returns the clob_exec result dict
     or None if execution failed.
     """
-    # Determine outcome_token_id from the market
+    # Determine outcome_token_id from the market.
+    # Try tokens list first; fall back to clobTokenIds[0=YES, 1=NO].
     market = signal.market
     tokens = market.get("tokens") or []
     outcome_token_id = None
@@ -38,6 +40,17 @@ def execute_signal(
         if outcome == signal.direction:
             outcome_token_id = tok.get("token_id") or tok.get("tokenId")
             break
+
+    if not outcome_token_id:
+        # Gamma API: clobTokenIds may be a JSON-encoded string [yes_id, no_id]
+        raw_ids = market.get("clobTokenIds") or []
+        if isinstance(raw_ids, str):
+            try:
+                raw_ids = json.loads(raw_ids)
+            except (json.JSONDecodeError, ValueError):
+                raw_ids = []
+        if len(raw_ids) >= 2:
+            outcome_token_id = str(raw_ids[0] if signal.direction == "YES" else raw_ids[1])
 
     if not outcome_token_id:
         logger.warning(
