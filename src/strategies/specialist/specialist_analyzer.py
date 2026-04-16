@@ -10,6 +10,7 @@ Returns a MarketAnalysis object used by signal_generator.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -186,11 +187,17 @@ class SpecialistAnalyzer:
             elif outcome == "NO":
                 no_token_id = tok.get("token_id") or tok.get("tokenId")
         # Fallback: clobTokenIds[0] = YES, [1] = NO (Gamma/CLOB convention)
+        # clobTokenIds may be a JSON-encoded string (double-encoded in Gamma response).
         if not yes_token_id or not no_token_id:
-            clob_ids = market.get("clobTokenIds") or []
-            if len(clob_ids) >= 2:
-                yes_token_id = yes_token_id or str(clob_ids[0])
-                no_token_id = no_token_id or str(clob_ids[1])
+            raw_ids = market.get("clobTokenIds") or []
+            if isinstance(raw_ids, str):
+                try:
+                    raw_ids = json.loads(raw_ids)
+                except (json.JSONDecodeError, ValueError):
+                    raw_ids = []
+            if len(raw_ids) >= 2:
+                yes_token_id = yes_token_id or str(raw_ids[0])
+                no_token_id = no_token_id or str(raw_ids[1])
 
         for addr, spec_data in holders_who_are_known.items():
             holder_info = holder_addrs.get(addr, {})
