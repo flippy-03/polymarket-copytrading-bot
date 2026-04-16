@@ -4,7 +4,9 @@ import { supabase } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const { data: portfolios } = await supabase.from("portfolio_state_ct").select("*");
+  const { data: portfolios } = await supabase
+    .from("portfolio_state_ct")
+    .select("strategy,run_id,is_shadow,current_capital,open_positions,is_circuit_broken,updated_at");
   const { data: openTrades } = await supabase
     .from("copy_trades")
     .select("strategy")

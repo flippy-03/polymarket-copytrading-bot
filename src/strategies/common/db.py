@@ -367,6 +367,12 @@ def close_shadow_pure(
     _db.update("copy_trades", match={"id": trade_id}, data=patch)
 
 
+_OPEN_TRADE_COLS = (
+    "id,run_id,strategy,status,is_shadow,"
+    "market_polymarket_id,outcome_token_id,"
+    "entry_price,position_usd,shares,metadata"
+)
+
 def list_open_trades(
     strategy: Optional[str] = None,
     *,
@@ -376,7 +382,7 @@ def list_open_trades(
     client = _db.get_client()
     q = (
         client.table("copy_trades")
-        .select("*")
+        .select(_OPEN_TRADE_COLS)
         .eq("status", "OPEN")
         .eq("run_id", run_id)
         .eq("is_shadow", is_shadow)
@@ -386,12 +392,17 @@ def list_open_trades(
     return q.execute().data
 
 
+_SHADOW_STOP_COLS = (
+    "id,outcome_token_id,market_polymarket_id,"
+    "shares,entry_price,position_usd"
+)
+
 def list_open_shadow_trades_needing_stops(strategy: Optional[str] = None, *, run_id: str) -> list[dict]:
     """Shadow trades whose 'stops' side has not been triggered yet."""
     client = _db.get_client()
     q = (
         client.table("copy_trades")
-        .select("*")
+        .select(_SHADOW_STOP_COLS)
         .eq("status", "OPEN")
         .eq("run_id", run_id)
         .eq("is_shadow", True)

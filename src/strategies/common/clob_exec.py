@@ -176,7 +176,11 @@ def close_paper_trade(trade_id: str, reason: str) -> None:
     """Close a real (is_shadow=false) trade using the current CLOB price."""
     from src.db import supabase_client as _db
     client = _db.get_client()
-    result = client.table("copy_trades").select("*").eq("id", trade_id).limit(1).execute()
+    _CLOSE_COLS = (
+        "id,status,is_shadow,outcome_token_id,shares,"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+    )
+    result = client.table("copy_trades").select(_CLOSE_COLS).eq("id", trade_id).limit(1).execute()
     if not result.data:
         logger.warning(f"close_paper_trade: trade {trade_id} not found")
         return
@@ -211,7 +215,11 @@ def close_shadow_trade(trade_id: str, reason: str) -> None:
     """
     from src.db import supabase_client as _db
     client = _db.get_client()
-    result = client.table("copy_trades").select("*").eq("id", trade_id).limit(1).execute()
+    _SHADOW_COLS = (
+        "id,status,is_shadow,outcome_token_id,shares,"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+    )
+    result = client.table("copy_trades").select(_SHADOW_COLS).eq("id", trade_id).limit(1).execute()
     if not result.data:
         return
     t = result.data[0]
