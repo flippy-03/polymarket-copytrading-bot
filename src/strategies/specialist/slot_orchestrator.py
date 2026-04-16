@@ -52,8 +52,12 @@ class SlotOrchestrator:
         closures: list[ClosureEvent] = self._position_manager.check_all_open()
         summary["closures"] = [c.reason for c in closures]
 
-        # Step 2 — Count open trades per universe
+        # Step 2 — Count open trades per universe + collect open condition_ids
         open_by_universe = self._count_open_per_universe()
+        # Market-level dedup: track which markets already have an open real trade.
+        # Updated within the tick to prevent opening two positions in the same market
+        # even if the router returns duplicate signals in a single cycle.
+        open_cids: set[str] = self._open_condition_ids()
         logger.info(
             f"  orchestrator: open per universe: "
             + ", ".join(f"{u}={n}" for u, n in open_by_universe.items())
@@ -84,11 +88,21 @@ class SlotOrchestrator:
             for signal in signals:
                 if free_slots <= 0:
                     break
+                # Skip if this market already has an open position (same condition_id).
+                # This prevents duplicates when the router returns the same market twice
+                # (e.g., matching multiple market types) or across tick boundary.
+                if signal.condition_id in open_cids:
+                    logger.debug(
+                        f"  orchestrator: skip dup market {signal.condition_id[:8]}… already open"
+                    )
+                    summary["skipped"].append(f"dup/{signal.condition_id[:8]}")
+                    continue
                 try:
                     result = execute_signal(signal, self._run_id, total_capital)
                     if result and result.get("real"):
                         summary["opened"].append(f"{universe}/{signal.direction}")
                         free_slots -= 1
+                        open_cids.add(signal.condition_id)  # prevent within-tick duplicate
                     else:
                         summary["skipped"].append(f"{universe}/{signal.direction}")
                 except Exception as e:
@@ -115,3 +129,24 @@ class SlotOrchestrator:
                 counts[universe] += 1
 
         return dict(counts)
+
+    def _open_condition_ids(self) -> set[str]:
+        """Return condition_ids of all currently open real SPECIALIST trades.
+
+        Used for market-level deduplication: prevents opening a second position
+        in a market that already has an open trade, even if the router returns
+        it as a candidate signal again.
+        """
+        try:
+            open_trades = db.list_open_trades(
+                strategy=STRATEGY,
+                run_id=self._run_id,
+                is_shadow=False,
+            )
+        except Exception:
+            return set()
+        return {
+            t["market_polymarket_id"]
+            for t in open_trades
+            if t.get("market_polymarket_id")
+        }

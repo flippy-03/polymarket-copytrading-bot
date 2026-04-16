@@ -359,6 +359,7 @@ export default function DashboardPage() {
                 <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
                 <th className="text-right px-3 py-2 font-medium">SL / TP</th>
+                <th className="text-right px-3 py-2 font-medium">P&L</th>
                 <th className="text-right px-3 py-2 font-medium">Size</th>
                 <th className="text-right px-5 py-2 font-medium">Held</th>
               </tr>
@@ -370,8 +371,9 @@ export default function DashboardPage() {
                 const universe = String(meta.universe ?? "");
                 const isShadow = p.is_shadow === true;
                 const entry = Number(p.entry_price ?? 0);
-                const sl = entry > 0 ? entry * 0.85 : null;
-                const tp = entry > 0 ? entry * 1.20 : null;
+                const sl = entry > 0 ? Math.max(entry * 0.85, 0.001) : null;
+                // Binary market prices ∈ [0, 1]: cap TP at 0.999 (resolves at 1.0)
+                const tp = entry > 0 ? Math.min(entry * 1.20, 0.999) : null;
                 const trailingActive = meta.trailing_active === true;
                 const hwm = meta.high_water_mark != null ? Number(meta.high_water_mark) : null;
                 return (
@@ -449,6 +451,14 @@ export default function DashboardPage() {
                         "—"
                       )}
                     </td>
+                    <td
+                      className="text-right px-3 py-2.5 font-medium text-xs"
+                      style={{ color: pnlColor(Number(p.unrealized_pnl ?? 0)) }}
+                    >
+                      {Number(p.unrealized_pnl ?? 0) !== 0
+                        ? formatPnl(Number(p.unrealized_pnl ?? 0))
+                        : <span style={{ color: "var(--text-secondary)" }}>—</span>}
+                    </td>
                     <td className="text-right px-3 py-2.5">
                       ${Number(p.position_usd ?? 0).toFixed(2)}
                     </td>
@@ -460,7 +470,7 @@ export default function DashboardPage() {
               })}
               {(positions ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={shadowMode === "BOTH" ? 8 : 7} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td colSpan={shadowMode === "BOTH" ? 9 : 8} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
                     No open positions
                   </td>
                 </tr>
@@ -473,7 +483,7 @@ export default function DashboardPage() {
             className="px-5 py-2.5 border-t flex justify-between items-center text-xs"
             style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
           >
-            <span>Unrealized P&L updates when positions close · SL/TP shown are fixed stops for shadow trades</span>
+            <span>P&L fetched live from CLOB · SL/TP are fixed stops for shadow trades</span>
             <span className="text-sm font-medium">
               <span>Total Unrealized:&nbsp;</span>
               <span style={{ color: pnlColor(totalUnrealized) }}>{formatPnl(totalUnrealized)}</span>

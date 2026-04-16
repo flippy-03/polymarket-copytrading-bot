@@ -63,8 +63,9 @@ def _open_row(
     shares = round(size_usd / price, 4)
     md = dict(metadata or {})
     if is_shadow:
-        md.setdefault("shadow_stop_price", round(price * (1 + SHADOW_STOP_LOSS_PCT), 4))
-        md.setdefault("shadow_take_price", round(price * (1 + SHADOW_TAKE_PROFIT_PCT), 4))
+        md.setdefault("shadow_stop_price", round(max(price * (1 + SHADOW_STOP_LOSS_PCT), 0.001), 4))
+        # Binary market prices are in [0, 1] — cap TP at 0.999 (resolved YES = 1.0)
+        md.setdefault("shadow_take_price", round(min(price * (1 + SHADOW_TAKE_PROFIT_PCT), 0.999), 4))
     return db.open_copy_trade({
         "run_id": run_id,
         "strategy": strategy,
