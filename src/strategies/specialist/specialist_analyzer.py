@@ -173,7 +173,9 @@ class SpecialistAnalyzer:
         yes_specialists = []
         no_specialists = []
 
-        # Determine YES/NO token IDs from market
+        # Determine YES/NO token IDs from market.
+        # Gamma API returns clobTokenIds=[yes_id, no_id] (not a "tokens" list).
+        # We try both formats so the analyzer works with any market dict shape.
         tokens = market.get("tokens") or []
         yes_token_id = None
         no_token_id = None
@@ -183,6 +185,12 @@ class SpecialistAnalyzer:
                 yes_token_id = tok.get("token_id") or tok.get("tokenId")
             elif outcome == "NO":
                 no_token_id = tok.get("token_id") or tok.get("tokenId")
+        # Fallback: clobTokenIds[0] = YES, [1] = NO (Gamma/CLOB convention)
+        if not yes_token_id or not no_token_id:
+            clob_ids = market.get("clobTokenIds") or []
+            if len(clob_ids) >= 2:
+                yes_token_id = yes_token_id or str(clob_ids[0])
+                no_token_id = no_token_id or str(clob_ids[1])
 
         for addr, spec_data in holders_who_are_known.items():
             holder_info = holder_addrs.get(addr, {})

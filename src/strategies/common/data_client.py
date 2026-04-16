@@ -110,9 +110,15 @@ class DataClient:
         tokens = self._get("/holders", params) or []
         holders: list[dict] = []
         for token_obj in tokens:
-            token_id = token_obj.get("tokenId") or token_obj.get("token_id")
+            # Polymarket Data API uses "token" (not "tokenId") at the outer level.
+            # Each holder also has "asset" with the same value as a fallback.
+            token_id = (
+                token_obj.get("token")
+                or token_obj.get("tokenId")
+                or token_obj.get("token_id")
+            )
             for holder in token_obj.get("holders") or []:
-                holder["_token_id"] = token_id
+                holder["_token_id"] = token_id or holder.get("asset")
                 holders.append(holder)
         return holders
 

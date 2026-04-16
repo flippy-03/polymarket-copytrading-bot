@@ -52,7 +52,12 @@ class Signal:
 
 
 def _get_price(market: dict, direction: str) -> float:
-    """Extract current price for YES or NO from market data."""
+    """Extract current price for YES or NO from market data.
+
+    Gamma API dicts have outcomePrices/lastTradePrice, not a 'tokens' list.
+    We try both formats.
+    """
+    # Format A: tokens list (if present)
     tokens = market.get("tokens") or []
     for tok in tokens:
         outcome = (tok.get("outcome") or "").upper()
@@ -62,14 +67,25 @@ def _get_price(market: dict, direction: str) -> float:
                 return float(p)
             except (TypeError, ValueError):
                 pass
-    # Fallback: use bestAsk or market-level price
-    p = market.get("outcomePrices") or market.get("prices")
-    if isinstance(p, list):
-        idx = 0 if direction == "YES" else 1
+
+    # Format B: Gamma outcomePrices = [yes_price, no_price]
+    idx = 0 if direction == "YES" else 1
+    p_list = market.get("outcomePrices") or market.get("prices")
+    if isinstance(p_list, list) and len(p_list) > idx:
         try:
-            return float(p[idx])
-        except (IndexError, TypeError, ValueError):
+            return float(p_list[idx])
+        except (TypeError, ValueError):
             pass
+
+    # Format C: lastTradePrice (single value — treat as YES price)
+    if direction == "YES":
+        ltp = market.get("lastTradePrice")
+        if ltp:
+            try:
+                return float(ltp)
+            except (TypeError, ValueError):
+                pass
+
     return 0.5  # Unknown price
 
 
