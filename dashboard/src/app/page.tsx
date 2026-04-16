@@ -91,16 +91,6 @@ export default function DashboardPage() {
     });
   })();
 
-  // Signals only exist for the BASKET strategy — skip the fetch entirely
-  // for SCALPER to save ~120 requests/hour per tab.
-  const signalsFetcher = useCallback(
-    () =>
-      strategy === "BASKET"
-        ? fetch(`/api/signals?strategy=${strategy}&limit=10`).then((r) => r.json())
-        : Promise.resolve([] as Record<string, unknown>[]),
-    [strategy],
-  );
-  const { data: signals } = useAutoRefresh<Record<string, unknown>[]>(signalsFetcher);
 
   const totalUnrealized = (positions ?? []).reduce(
     (s, p) => s + Number(p.unrealized_pnl ?? 0),
@@ -417,62 +407,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-
-      {strategy === "BASKET" && signals && signals.length > 0 && (
-        <div
-          className="rounded-xl border overflow-hidden"
-          style={{ background: "var(--bg-card)", borderColor: "var(--border)" }}
-        >
-          <div className="px-5 py-3 border-b" style={{ borderColor: "var(--border)" }}>
-            <h3 className="text-sm font-medium">Pending Consensus Signals</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr
-                  style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}
-                >
-                  <th className="text-left px-5 py-2 font-medium">Market</th>
-                  <th className="text-center px-3 py-2 font-medium">Basket</th>
-                  <th className="text-center px-3 py-2 font-medium">Dir</th>
-                  <th className="text-right px-3 py-2 font-medium">Consensus</th>
-                  <th className="text-right px-5 py-2 font-medium">Age</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((s) => (
-                  <tr key={String(s.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
-                    <td className="px-5 py-2.5 max-w-64 truncate" title={String(s.market_question ?? "")}>
-                      {String(s.market_question ?? "")}
-                    </td>
-                    <td className="text-center px-3 py-2.5" style={{ color: "var(--text-secondary)" }}>
-                      {String(s.basket_category ?? "")}
-                    </td>
-                    <td className="text-center px-3 py-2.5">
-                      <span
-                        className="px-2 py-0.5 rounded text-xs font-bold"
-                        style={{
-                          background:
-                            s.direction === "YES" ? "var(--green-dim)" : "var(--red-dim)",
-                          color: s.direction === "YES" ? "var(--green)" : "var(--red)",
-                        }}
-                      >
-                        {String(s.direction ?? "")}
-                      </span>
-                    </td>
-                    <td className="text-right px-3 py-2.5">
-                      {(Number(s.consensus_pct ?? 0) * 100).toFixed(0)}% ({String(s.wallets_agreeing ?? "?")}/{String(s.wallets_total ?? "?")})
-                    </td>
-                    <td className="text-right px-5 py-2.5" style={{ color: "var(--text-secondary)" }}>
-                      {timeAgo(s.created_at as string)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       <div
         className="rounded-xl border overflow-hidden"

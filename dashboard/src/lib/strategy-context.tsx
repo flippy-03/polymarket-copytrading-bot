@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-export type Strategy = "BASKET" | "SCALPER";
+export type Strategy = "SPECIALIST" | "SCALPER";
 export type ShadowMode = "REAL" | "SHADOW" | "BOTH";
 
 const STRATEGY_KEY = "ct.strategy";
@@ -21,7 +21,7 @@ type Ctx = {
 const StrategyContext = createContext<Ctx | null>(null);
 
 export function StrategyProvider({ children }: { children: React.ReactNode }) {
-  const [strategy, setStrategyState] = useState<Strategy>("BASKET");
+  const [strategy, setStrategyState] = useState<Strategy>("SPECIALIST");
   const [runId, setRunIdState] = useState<string | null>(null);
   const [shadowMode, setShadowModeState] = useState<ShadowMode>("REAL");
 
@@ -29,7 +29,7 @@ export function StrategyProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined") return;
     const savedStrategy = window.localStorage.getItem(STRATEGY_KEY);
     const initialStrategy: Strategy =
-      savedStrategy === "BASKET" || savedStrategy === "SCALPER" ? savedStrategy : "BASKET";
+      savedStrategy === "SPECIALIST" || savedStrategy === "SCALPER" ? savedStrategy : "SPECIALIST";
     setStrategyState(initialStrategy);
 
     const savedRun = window.localStorage.getItem(RUN_KEY_PREFIX + initialStrategy);
@@ -81,7 +81,7 @@ export function useStrategy(): Ctx {
   const ctx = useContext(StrategyContext);
   if (!ctx) {
     return {
-      strategy: "BASKET",
+      strategy: "SPECIALIST",
       setStrategy: () => {},
       runId: null,
       setRunId: () => {},

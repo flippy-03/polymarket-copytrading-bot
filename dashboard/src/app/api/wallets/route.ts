@@ -5,7 +5,6 @@ import { resolveRunId, resolveStrategy } from "@/lib/strategy-param";
 export const dynamic = "force-dynamic";
 
 // Only the columns actually rendered by dashboard/src/app/wallets/page.tsx.
-// `select("*")` here previously cost ~740 KB per request.
 const METRIC_COLUMNS =
   "wallet_address,snapshot_at,win_rate,total_trades,pnl_30d,pnl_7d," +
   "profit_factor,avg_holding_days,trades_per_month,sharpe_14d,bot_score," +
@@ -23,9 +22,8 @@ function dedupeLatest(rows: MetricRow[] | null): Map<string, MetricRow> {
 
 /**
  * Returns the latest wallet_metrics snapshot per wallet, filtered by membership
- * table (scalper_pool or basket_wallets). We query the tiny membership table
- * first (7-21 rows) and then fetch metrics for just those addresses — payload
- * drops from ~740 KB to ~5 KB.
+ * table (scalper_pool or spec_ranking). We query the tiny membership table
+ * first and then fetch metrics for just those addresses.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -36,7 +34,7 @@ export async function GET(request: Request) {
   // ── Fetch membership list first (small result) ─────────────────
   let addresses: string[] = [];
   let scalperMap: Map<string, Record<string, unknown>> | null = null;
-  let basketMap: Map<string, Record<string, unknown>> | null = null;
+  let specialistMap: Map<string, Record<string, unknown>> | null = null;
 
   if (source === "scalper" || source === "all") {
     let poolQuery = supabase
@@ -49,18 +47,17 @@ export async function GET(request: Request) {
     addresses.push(...scalperMap.keys());
   }
 
-  if (source === "basket" || source === "all") {
-    let bwQuery = supabase
-      .from("basket_wallets")
-      .select("wallet_address, basket_id, rank_position, rank_score")
-      .is("exited_at", null);
-    if (runId) bwQuery = bwQuery.eq("run_id", runId);
-    const { data: bw } = await bwQuery;
-    basketMap = new Map((bw ?? []).map((b) => [b.wallet_address as string, b]));
-    addresses.push(...basketMap.keys());
+  if (source === "specialist" || source === "all") {
+    let srQuery = supabase
+      .from("spec_ranking")
+      .select("wallet, universe, rank_position, specialist_score");
+    if (runId) srQuery = srQuery.eq("run_id", runId);
+    const { data: sr } = await srQuery;
+    specialistMap = new Map((sr ?? []).map((s) => [s.wallet as string, s]));
+    addresses.push(...specialistMap.keys());
   }
 
-  // Dedupe the address list (basket + scalper may overlap).
+  // Dedupe the address list.
   addresses = Array.from(new Set(addresses));
 
   if (addresses.length === 0) {
@@ -73,7 +70,6 @@ export async function GET(request: Request) {
     .select(METRIC_COLUMNS)
     .in("wallet_address", addresses)
     .order("snapshot_at", { ascending: false })
-    // Max ~12 snapshots × 21 wallets = 252 rows; bounded.
     .limit(500);
   if (runId) metricsQuery = metricsQuery.eq("run_id", runId);
 
@@ -88,7 +84,7 @@ export async function GET(request: Request) {
     const row = latestByWallet.get(addr) ?? { wallet_address: addr };
     const enriched: Record<string, unknown> = { ...row, wallet_address: addr };
     if (scalperMap?.has(addr)) enriched.scalper = scalperMap.get(addr);
-    if (basketMap?.has(addr)) enriched.basket = basketMap.get(addr);
+    if (specialistMap?.has(addr)) enriched.specialist = specialistMap.get(addr);
     out.push(enriched);
   }
 
