@@ -40,6 +40,37 @@ def get_token_price(token_id: str) -> float | None:
         return None
 
 
+def get_spread(token_id: str) -> tuple[float | None, float | None]:
+    """Return (ask, bid) for a token from the CLOB.
+
+    ask  = best offer to buy  (side=BUY)
+    bid  = best offer to sell (side=SELL)
+    spread = ask - bid
+
+    Returns (None, None) if either leg fails so the caller can decide
+    whether to proceed or abort.
+    """
+    ask: float | None = None
+    bid: float | None = None
+    try:
+        r = _clob.get("/price", params={"token_id": token_id, "side": "BUY"})
+        r.raise_for_status()
+        v = float(r.json().get("price") or 0)
+        if v > 0:
+            ask = v
+    except Exception as e:
+        logger.debug(f"CLOB /price BUY failed for {token_id[:8]}…: {e}")
+    try:
+        r = _clob.get("/price", params={"token_id": token_id, "side": "SELL"})
+        r.raise_for_status()
+        v = float(r.json().get("price") or 0)
+        if v > 0:
+            bid = v
+    except Exception as e:
+        logger.debug(f"CLOB /price SELL failed for {token_id[:8]}…: {e}")
+    return ask, bid
+
+
 def _record_price(token_id: str, price: float, market_id: str | None) -> None:
     db.record_price_snapshot(token_id, price, market_polymarket_id=market_id)
 

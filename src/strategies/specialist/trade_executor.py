@@ -64,6 +64,21 @@ def execute_signal(
     size_usd = min(size_usd, C.SPECIALIST_MAX_TRADE_USD)
     size_usd = max(size_usd, C.SPECIALIST_MIN_TRADE_USD)
 
+    # Spread check — reject if bid-ask spread exceeds the configured threshold.
+    # Two sequential CLOB calls (ask + bid); only blocks if both prices are
+    # available and spread is confirmed wide. If the CLOB is unreachable,
+    # open_paper_trade() will fail on its own price fetch.
+    ask, bid = clob_exec.get_spread(outcome_token_id)
+    if ask is not None and bid is not None:
+        spread = round(ask - bid, 4)
+        if spread > C.SPECIALIST_MARKET_MAX_SPREAD:
+            logger.info(
+                f"  executor: skip {signal.condition_id[:12]}… "
+                f"spread={spread:.4f} (ask={ask:.4f} bid={bid:.4f}) "
+                f"> max={C.SPECIALIST_MARKET_MAX_SPREAD} — will retry next tick"
+            )
+            return None
+
     logger.info(
         f"  executor: opening {signal.direction} ${size_usd:.2f} "
         f"in {signal.condition_id[:12]}… [{signal.quality.value}] "
