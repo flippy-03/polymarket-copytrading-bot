@@ -61,17 +61,30 @@ echo "  deps OK"
 REMOTE
 fi
 
-# ── 4. Restart servicios (solo en deploys normales, setup ya los arranca) ────
+# ── 4. Instalar unit specialist (si no existe) + restart servicios ───────────
 if [ "$SETUP" = false ]; then
-  echo "▶ [4/4] Reiniciando servicios…"
-  ssh "$VPS_HOST" "systemctl restart polymarket-basket polymarket-scalper 2>/dev/null && echo '  OK' || echo '  (no instalados aún)'"
+  echo "▶ [4/4] Instalando/reiniciando servicios…"
+  ssh "$VPS_HOST" bash <<REMOTE
+set -e
+cd "$VPS_DIR"
+# Instalar unit specialist si no existe aún
+if [ ! -f /etc/systemd/system/polymarket-specialist.service ]; then
+  cp deploy/polymarket-specialist.service /etc/systemd/system/polymarket-specialist.service
+  systemctl daemon-reload
+  systemctl enable polymarket-specialist
+  echo "  unit polymarket-specialist instalado y habilitado"
+fi
+# Reiniciar servicios activos
+systemctl restart polymarket-scalper 2>/dev/null && echo "  polymarket-scalper restarted" || echo "  polymarket-scalper: no instalado"
+systemctl restart polymarket-specialist 2>/dev/null && echo "  polymarket-specialist restarted" || echo "  polymarket-specialist: no instalado"
+REMOTE
 fi
 
 # ── Estado final ──────────────────────────────────────────────────────────────
 echo ""
 echo "✓ Deploy completo. Estado de servicios:"
 ssh "$VPS_HOST" bash <<'STATUS'
-for svc in polymarket-basket polymarket-scalper; do
+for svc in polymarket-scalper polymarket-specialist; do
   if systemctl is-active --quiet "$svc" 2>/dev/null; then
     echo "  ✓ $svc: running"
   else
@@ -84,5 +97,5 @@ STATUS
 if [ "$SHOW_LOGS" = true ]; then
   echo ""
   echo "── logs (Ctrl+C para salir) ─────────────────────────────────────────────"
-  ssh "$VPS_HOST" "journalctl -u polymarket-basket -u polymarket-scalper -f --output=cat"
+  ssh "$VPS_HOST" "journalctl -u polymarket-scalper -u polymarket-specialist -f --output=cat"
 fi
