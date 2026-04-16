@@ -53,14 +53,12 @@ class SlotOrchestrator:
         summary["closures"] = [c.reason for c in closures]
 
         # Step 2 — Count open trades per universe + collect open condition_ids
-        open_by_universe = self._count_open_per_universe()
-        # Market-level dedup: track which markets already have an open real trade.
-        # Updated within the tick to prevent opening two positions in the same market
-        # even if the router returns duplicate signals in a single cycle.
-        open_cids: set[str] = self._open_condition_ids()
+        # Both derived in a single DB round-trip via _snapshot_open_trades().
+        open_by_universe, open_cids = self._snapshot_open_trades()
+        # open_cids is updated within the loop so within-tick duplicates are also blocked.
         logger.info(
-            f"  orchestrator: open per universe: "
-            + ", ".join(f"{u}={n}" for u, n in open_by_universe.items())
+            "  orchestrator: open per universe: "
+            + (", ".join(f"{u}={n}" for u, n in open_by_universe.items()) or "none")
         )
 
         # Step 3 — Fill free slots
@@ -110,32 +108,12 @@ class SlotOrchestrator:
 
         return summary
 
-    def _count_open_per_universe(self) -> dict[str, int]:
-        """Count open SPECIALIST trades per universe (from metadata.universe)."""
-        try:
-            open_trades = db.list_open_trades(
-                strategy=STRATEGY,
-                run_id=self._run_id,
-                is_shadow=False,
-            )
-        except Exception:
-            return {}
+    def _snapshot_open_trades(self) -> tuple[dict[str, int], set[str]]:
+        """Single DB round-trip: return (open_by_universe, open_condition_ids).
 
-        counts: Counter = Counter()
-        for trade in open_trades:
-            metadata = trade.get("metadata") or {}
-            universe = metadata.get("universe")
-            if universe:
-                counts[universe] += 1
-
-        return dict(counts)
-
-    def _open_condition_ids(self) -> set[str]:
-        """Return condition_ids of all currently open real SPECIALIST trades.
-
-        Used for market-level deduplication: prevents opening a second position
-        in a market that already has an open trade, even if the router returns
-        it as a candidate signal again.
+        open_by_universe: {universe → count} used for slot accounting.
+        open_condition_ids: set of condition_ids with an open real trade, used
+        for market-level deduplication to prevent double-entering the same market.
         """
         try:
             open_trades = db.list_open_trades(
@@ -144,9 +122,17 @@ class SlotOrchestrator:
                 is_shadow=False,
             )
         except Exception:
-            return set()
-        return {
-            t["market_polymarket_id"]
-            for t in open_trades
-            if t.get("market_polymarket_id")
-        }
+            return {}, set()
+
+        counts: Counter = Counter()
+        cids: set[str] = set()
+        for trade in open_trades:
+            metadata = trade.get("metadata") or {}
+            universe = metadata.get("universe")
+            if universe:
+                counts[universe] += 1
+            cid = trade.get("market_polymarket_id")
+            if cid:
+                cids.add(cid)
+
+        return dict(counts), cids
