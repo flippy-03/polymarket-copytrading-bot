@@ -88,6 +88,11 @@ SCALPER_ROTATION_HOUR_UTC = 0
 SCALPER_CONSECUTIVE_LOSS_LIMIT = 3
 SCALPER_MONITOR_INTERVAL_SECONDS = 30
 
+# Specialist CB: higher threshold because the strategy holds few positions
+# over multi-hour horizons — 3 losses in a row is normal variance, not a
+# systemic failure. Revisit after ≥30 closed positions.
+SPECIALIST_CONSECUTIVE_LOSS_LIMIT = 5
+
 # ── Specialist Edge strategy ─────────────────────────────
 SPECIALIST_INITIAL_CAPITAL = float(os.getenv("SPECIALIST_INITIAL_CAPITAL", "1000"))
 

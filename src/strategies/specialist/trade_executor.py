@@ -64,11 +64,14 @@ def execute_signal(
     size_usd = min(size_usd, C.SPECIALIST_MAX_TRADE_USD)
     size_usd = max(size_usd, C.SPECIALIST_MIN_TRADE_USD)
 
-    # Spread check — reject if bid-ask spread exceeds the configured threshold.
-    # Two sequential CLOB calls (ask + bid); only blocks if both prices are
-    # available and spread is confirmed wide. If the CLOB is unreachable,
-    # open_paper_trade() will fail on its own price fetch.
+    # Spread + CLOB price range check.
+    # get_spread() gives us both ask and bid with two CLOB calls.  We reuse
+    # those values to (a) block wide spreads and (b) guard against stale Gamma
+    # prices — the signal_generator checks price using Gamma market data which
+    # can lag the CLOB by several seconds, causing entries at near-certain
+    # prices (e.g. $0.999) that offer essentially zero edge.
     ask, bid = clob_exec.get_spread(outcome_token_id)
+    clob_ask = ask  # may be None if CLOB unreachable — checked below
     if ask is not None and bid is not None:
         spread = round(ask - bid, 4)
         if spread > C.SPECIALIST_MARKET_MAX_SPREAD:
@@ -76,6 +79,19 @@ def execute_signal(
                 f"  executor: skip {signal.condition_id[:12]}… "
                 f"spread={spread:.4f} (ask={ask:.4f} bid={bid:.4f}) "
                 f"> max={C.SPECIALIST_MARKET_MAX_SPREAD} — will retry next tick"
+            )
+            return None
+
+    # CLOB price range guard — mirrors SPECIALIST_MARKET_MIN/MAX_PRICE but
+    # uses the live CLOB ask rather than the Gamma-sourced price in the signal.
+    # Rejects if the token is now trading outside the allowed range.
+    if clob_ask is not None:
+        if clob_ask < C.SPECIALIST_MARKET_MIN_PRICE or clob_ask > C.SPECIALIST_MARKET_MAX_PRICE:
+            logger.info(
+                f"  executor: skip {signal.condition_id[:12]}… "
+                f"CLOB ask={clob_ask:.4f} out of range "
+                f"[{C.SPECIALIST_MARKET_MIN_PRICE}, {C.SPECIALIST_MARKET_MAX_PRICE}] "
+                f"— Gamma price was stale, will retry next tick"
             )
             return None
 

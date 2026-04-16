@@ -96,16 +96,17 @@ class PositionManager:
             logger.debug(f"  position_manager: resolution check {trade_id[:8]}: {e}")
 
         # ── Price-based stop checks ───────────────────────────
+        # No hard stop: specialist markets (sports, crypto range/above) all
+        # resolve within hours. A fixed -20% hard stop triggers on temporary
+        # intra-game / intraday volatility, not on prediction errors.
+        # Rely instead on: (1) trailing stop to protect accumulated gains,
+        # (2) natural market resolution as the primary exit.
+        # Revisit once we have ≥30 closed positions to assess P&L distribution.
         current_price = clob_exec.get_token_price(token_id)
         if not current_price or current_price <= 0:
             return None
 
         pct_change = (current_price - entry_price) / entry_price
-
-        # Hard stop
-        if pct_change <= self._ts_hard_stop:
-            clob_exec.close_paper_trade(trade_id, "STOP_LOSS")
-            return ClosureEvent(trade_id, "STOP_LOSS", universe, cid)
 
         trailing_active = bool(metadata.get("trailing_active", False))
         high_water = float(metadata.get("high_water_mark") or current_price)

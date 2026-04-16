@@ -21,8 +21,14 @@ from src.strategies.common import config as C
 from src.strategies.common import db
 from src.utils.logger import logger
 
-# Consecutive losses threshold. Reuses the scalper config constant (= 3).
-_LOSS_STREAK_LIMIT = C.SCALPER_CONSECUTIVE_LOSS_LIMIT
+# Per-strategy consecutive-loss thresholds.
+# Scalper = 3 (high-frequency, 3 losses is a systemic signal).
+# Specialist = 5 (few positions, multi-hour horizons, 3 losses is variance).
+_LOSS_STREAK_LIMITS: dict[str, int] = {
+    "SCALPER": C.SCALPER_CONSECUTIVE_LOSS_LIMIT,
+    "SPECIALIST": C.SPECIALIST_CONSECUTIVE_LOSS_LIMIT,
+}
+_DEFAULT_LOSS_STREAK_LIMIT = C.SCALPER_CONSECUTIVE_LOSS_LIMIT
 _COOLDOWN_HOURS = 24
 
 
@@ -63,7 +69,8 @@ def register_loss_and_maybe_break(strategy: str, loss_pct: float, *, run_id: str
         return
     losses = int(p.get("consecutive_losses") or 0) + 1
     data: dict = {"consecutive_losses": losses}
-    if losses >= _LOSS_STREAK_LIMIT:
+    limit = _LOSS_STREAK_LIMITS.get(strategy, _DEFAULT_LOSS_STREAK_LIMIT)
+    if losses >= limit:
         until = (_now() + timedelta(hours=_COOLDOWN_HOURS)).isoformat()
         data["is_circuit_broken"] = True
         data["circuit_broken_until"] = until
