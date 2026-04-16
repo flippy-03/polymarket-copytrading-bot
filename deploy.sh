@@ -41,6 +41,9 @@ fi
 # ── 2. Enviar código al VPS (git archive → ssh tar) ──────────────────────────
 echo "▶ [2/4] Enviando código → $VPS_HOST:$VPS_DIR …"
 ssh "$VPS_HOST" "mkdir -p '$VPS_DIR'"
+# Limpiar directorios que git archive no borra (pages/routes eliminados siguen en VPS).
+# Borramos y re-extraemos dashboard/src/app y src/strategies para garantizar paridad con git HEAD.
+ssh "$VPS_HOST" "rm -rf '$VPS_DIR/dashboard/src/app' '$VPS_DIR/dashboard/src/components' '$VPS_DIR/src/strategies'"
 git archive --format=tar.gz HEAD | ssh "$VPS_HOST" "tar xzf - -C '$VPS_DIR'"
 # .env nunca va en git → lo enviamos aparte
 scp -q .env "$VPS_HOST:$VPS_DIR/.env"
@@ -63,7 +66,7 @@ fi
 
 # ── 4. Instalar unit specialist (si no existe) + restart servicios ───────────
 if [ "$SETUP" = false ]; then
-  echo "▶ [4/4] Instalando/reiniciando servicios…"
+  echo "▶ [4/5] Instalando/reiniciando servicios Python…"
   ssh "$VPS_HOST" bash <<REMOTE
 set -e
 cd "$VPS_DIR"
@@ -80,6 +83,15 @@ systemctl restart polymarket-specialist 2>/dev/null && echo "  polymarket-specia
 REMOTE
 fi
 
+# ── 5. Build + restart dashboard (Next.js via PM2) ───────────────────────────
+echo "▶ [5/5] Build dashboard + pm2 restart…"
+ssh "$VPS_HOST" bash <<REMOTE
+set -e
+cd "$VPS_DIR/dashboard"
+npm run build
+pm2 restart polymarket-dashboard 2>/dev/null && echo "  dashboard restarted" || pm2 start npm --name polymarket-dashboard -- start
+REMOTE
+
 # ── Estado final ──────────────────────────────────────────────────────────────
 echo ""
 echo "✓ Deploy completo. Estado de servicios:"
@@ -91,6 +103,14 @@ for svc in polymarket-scalper polymarket-specialist; do
     echo "  ✗ $svc: stopped / no instalado"
   fi
 done
+pm2 jlist 2>/dev/null | python3 -c "
+import json,sys
+procs = json.load(sys.stdin)
+for p in procs:
+    status = p['pm2_env']['status']
+    name = p['name']
+    print(f'  {chr(10003) if status==\"online\" else chr(10007)} {name}: {status}')
+" 2>/dev/null || pm2 list --no-color 2>/dev/null | grep polymarket-dashboard || true
 STATUS
 
 # ── Logs opcionales ───────────────────────────────────────────────────────────
