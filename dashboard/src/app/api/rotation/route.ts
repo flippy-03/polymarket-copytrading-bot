@@ -19,19 +19,35 @@ export async function GET(request: Request) {
   let poolQuery = supabase
     .from("scalper_pool")
     .select(
-      "wallet_address, status, sharpe_14d, rank_position, capital_allocated_usd, consecutive_losses, entered_at, run_id",
+      "wallet_address, status, sharpe_14d, rank_position, capital_allocated_usd, entered_at, run_id",
     )
     .order("rank_position", { ascending: true, nullsFirst: false });
   if (runId) poolQuery = poolQuery.eq("run_id", runId);
 
-  const [{ data: history, error: histErr }, { data: pool, error: poolErr }] =
-    await Promise.all([historyQuery, poolQuery]);
+  // consecutive_losses is portfolio-level (not per-wallet). Fetch from portfolio_state_ct.
+  let portfolioQuery = supabase
+    .from("portfolio_state_ct")
+    .select("consecutive_losses, is_circuit_broken")
+    .eq("strategy", "SCALPER")
+    .eq("is_shadow", false)
+    .limit(1);
+  if (runId) portfolioQuery = portfolioQuery.eq("run_id", runId);
+
+  const [
+    { data: history, error: histErr },
+    { data: pool, error: poolErr },
+    { data: portfolioRows },
+  ] = await Promise.all([historyQuery, poolQuery, portfolioQuery]);
 
   if (histErr) return NextResponse.json({ error: histErr.message }, { status: 500 });
   if (poolErr) return NextResponse.json({ error: poolErr.message }, { status: 500 });
 
+  const portfolio = portfolioRows?.[0] ?? null;
+
   return NextResponse.json({
     history: history ?? [],
     pool: pool ?? [],
+    consecutive_losses: portfolio?.consecutive_losses ?? 0,
+    is_circuit_broken: portfolio?.is_circuit_broken ?? false,
   });
 }

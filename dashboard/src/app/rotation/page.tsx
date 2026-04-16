@@ -10,7 +10,6 @@ type PoolRow = {
   sharpe_14d: number | null;
   rank_position: number | null;
   capital_allocated_usd: number | null;
-  consecutive_losses: number | null;
   entered_at: string;
 };
 
@@ -33,6 +32,8 @@ type RotationEvent = {
 type Response = {
   history: RotationEvent[];
   pool: PoolRow[];
+  consecutive_losses: number;
+  is_circuit_broken: boolean;
 };
 
 export default function RotationPage() {
@@ -47,6 +48,8 @@ export default function RotationPage() {
 
   const pool = data?.pool ?? [];
   const history = data?.history ?? [];
+  const consecutiveLosses = data?.consecutive_losses ?? 0;
+  const isCircuitBroken = data?.is_circuit_broken ?? false;
 
   const titulars = pool.filter((p) => p.status === "ACTIVE_TITULAR");
   const benched = pool.filter((p) => p.status === "POOL");
@@ -54,11 +57,25 @@ export default function RotationPage() {
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <div>
-        <h2 className="text-xl font-bold">Scalper Rotation</h2>
-        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Weekly pool rotation ranked by 14d Sharpe (Mon 00:00 UTC)
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-bold">Scalper Rotation</h2>
+          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Weekly pool rotation ranked by 14d Sharpe (Mon 00:00 UTC)
+          </p>
+        </div>
+        {(isCircuitBroken || consecutiveLosses > 0) && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold"
+            style={{
+              background: isCircuitBroken ? "var(--red-dim)" : "#ffd93d22",
+              color: isCircuitBroken ? "var(--red)" : "var(--yellow)",
+              border: `1px solid ${isCircuitBroken ? "var(--red)" : "var(--yellow)"}`,
+            }}
+          >
+            {isCircuitBroken ? "⚡ CB ACTIVE" : `${consecutiveLosses}L streak`}
+          </div>
+        )}
       </div>
 
       {loading && !data && (
@@ -160,8 +177,6 @@ function PoolSection({
                 {r.capital_allocated_usd != null &&
                   r.capital_allocated_usd > 0 &&
                   ` · $${r.capital_allocated_usd.toFixed(0)}`}
-                {(r.consecutive_losses ?? 0) > 0 &&
-                  ` · ${r.consecutive_losses}L`}
               </span>
             </div>
           ))}

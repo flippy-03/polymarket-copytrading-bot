@@ -24,6 +24,10 @@ class ScalperExecutor:
         self._owns_data = data is None
         self.run_id = run_id or db.get_active_run(self.STRATEGY)
         db.ensure_portfolio_row(
+            self.STRATEGY, run_id=self.run_id, is_shadow=False,
+            initial_capital=C.SCALPER_INITIAL_CAPITAL, max_open_positions=C.MAX_OPEN_POSITIONS,
+        )
+        db.ensure_portfolio_row(
             self.STRATEGY, run_id=self.run_id, is_shadow=True,
             initial_capital=C.SCALPER_INITIAL_CAPITAL, max_open_positions=C.MAX_OPEN_POSITIONS,
         )
