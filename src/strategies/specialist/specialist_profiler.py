@@ -82,23 +82,57 @@ def _calculate_score(
     )
 
 
+def _cv(values: list[float]) -> float | None:
+    """Coefficient of variation for a list of positive floats. Returns None if < 2 values."""
+    if len(values) < 2:
+        return None
+    mean = sum(values) / len(values)
+    if mean == 0:
+        return None
+    variance = sum((v - mean) ** 2 for v in values) / len(values)
+    return variance ** 0.5 / mean
+
+
 def _is_bot_heuristic(trades: list[dict]) -> bool:
-    """Very lightweight bot check (the full pipeline is in wallet_filter)."""
+    """Very lightweight bot check (the full pipeline is in wallet_filter).
+
+    Two independent tests — either one alone is enough to flag:
+      1. Size uniformity  — position-sizing bot (fixed-size orders)
+      2. Interval uniformity — speed / HFT bot (fires at fixed cadence)
+
+    Threshold: CV < 0.15 means all values are within ~15% of the mean,
+    which is abnormally regular for a human trader.
+    """
     if len(trades) < 20:
         return False
-    # Suspiciously uniform trade sizes
+
+    # Test 1 — Suspiciously uniform trade sizes
     sizes = [
         float(t.get("usdcSize") or 0) or float(t.get("size") or 0) * float(t.get("price") or 0.5)
         for t in trades
     ]
     sizes = [s for s in sizes if s > 0]
-    if not sizes:
-        return False
-    mean = sum(sizes) / len(sizes)
-    if mean == 0:
-        return False
-    cv = (sum((s - mean) ** 2 for s in sizes) / len(sizes)) ** 0.5 / mean
-    return cv < 0.15  # Very uniform → likely bot
+    cv_size = _cv(sizes)
+    if cv_size is not None and cv_size < 0.15:
+        return True
+
+    # Test 2 — Suspiciously uniform trade intervals (speed / HFT bot)
+    timestamps: list[int] = []
+    for t in trades:
+        ts = t.get("timestamp") or t.get("createdAt") or 0
+        try:
+            timestamps.append(int(ts))
+        except (TypeError, ValueError):
+            pass
+    timestamps.sort()
+    if len(timestamps) >= 20:
+        intervals = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
+        intervals = [iv for iv in intervals if iv > 0]  # discard same-second duplicates
+        cv_interval = _cv(intervals)
+        if cv_interval is not None and cv_interval < 0.15:
+            return True
+
+    return False
 
 
 class SpecialistProfiler:

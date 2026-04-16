@@ -108,17 +108,20 @@ class HybridRouter:
                         logger.info(
                             f"  signal [{signal.quality.value}] {signal.condition_id[:12]}… "
                             f"dir={signal.direction} specialists={signal.specialists_for}/{signal.specialists_against} "
-                            f"ratio={signal.ratio:.1f} eROI={signal.expected_roi:.1%}"
+                            f"ratio={signal.ratio:.1f} eROI={signal.expected_roi:.1%} "
+                            f"cROI={signal.compound_roi:.1%}"
                         )
                 except Exception as e:
                     logger.warning(f"  router analyze failed: {e}")
                 time.sleep(0.15)
 
-        # F — Sort by expected ROI, CLEAN first
+        # F — Sort: CLEAN first, then by compound_roi DESC within each tier.
+        # compound_roi = expected_roi × time_bonus, so shorter-duration markets
+        # at equal expected_roi rank higher. Entry gates are unchanged.
         all_signals.sort(
             key=lambda s: (
                 s.quality.value == "CLEAN",  # True > False
-                s.expected_roi,
+                s.compound_roi,
             ),
             reverse=True,
         )

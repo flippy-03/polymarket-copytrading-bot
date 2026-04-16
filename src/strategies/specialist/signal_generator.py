@@ -14,6 +14,7 @@ Expected ROI:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -44,11 +45,36 @@ class Signal:
     confidence: float
     conflict_penalty: float
     expected_roi: float
+    compound_roi: float    # expected_roi × time_bonus; used for ranking only
     condition_id: str
 
     @property
     def is_actionable(self) -> bool:
         return self.quality in (SignalQuality.CLEAN, SignalQuality.CONTESTED)
+
+
+def _hours_to_resolution(market: dict) -> float:
+    """Hours from now until the market's end date.
+
+    Returns a floor of 0.5 so the time_bonus never overflows.
+    Falls back to 12.0 (mid-range) if the field is missing or unparseable.
+    """
+    raw = (
+        market.get("endDateIso")
+        or market.get("endDate")
+        or market.get("end_date_iso")
+        or market.get("end_date")
+        or ""
+    )
+    if not raw:
+        return 12.0
+    try:
+        s = str(raw).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        delta = (dt - datetime.now(timezone.utc)).total_seconds() / 3600
+        return max(0.5, delta)
+    except Exception:
+        return 12.0
 
 
 def _get_price(market: dict, direction: str) -> float:
@@ -155,6 +181,14 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
 
     expected_roi = potential_roi * confidence * (1.0 - conflict_penalty)
 
+    # Compound ROI: mild time bonus that re-ranks signals within the same quality
+    # tier — shorter-duration markets at equal expected_roi rise in priority.
+    # Exponent 0.25 keeps the bonus gentle: 1h→×1.57, 6h→×1.0, 24h→×0.70.
+    # This field is used ONLY for ranking; it never gates entry.
+    hours = _hours_to_resolution(analysis.market)
+    time_bonus = min(1.0, 6.0 / hours) ** 0.25
+    compound_roi = expected_roi * time_bonus
+
     return Signal(
         market=analysis.market,
         universe=analysis.universe,
@@ -171,6 +205,7 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
         confidence=round(confidence, 4),
         conflict_penalty=round(conflict_penalty, 4),
         expected_roi=round(expected_roi, 4),
+        compound_roi=round(compound_roi, 4),
         condition_id=analysis.condition_id,
     )
 
