@@ -55,7 +55,7 @@ export async function GET(request: Request) {
 
   // Aggregate per-titular exposure
   const exposureByWallet: Record<string, { total: number; count: number; byType: Record<string, number> }> = {};
-  for (const t of openTrades ?? []) {
+  for (const t of (openTrades ?? []) as unknown as PoolRow[]) {
     const w = t.source_wallet as string;
     if (!exposureByWallet[w]) {
       exposureByWallet[w] = { total: 0, count: 0, byType: {} };
@@ -81,7 +81,7 @@ export async function GET(request: Request) {
     : { data: [] };
 
   const profileMap = new Map(
-    (profiles ?? []).map((p: Record<string, unknown>) => [p.wallet as string, p])
+    ((profiles ?? []) as unknown as PoolRow[]).map((p) => [p.wallet as string, p])
   );
 
   // Build titular detail objects
