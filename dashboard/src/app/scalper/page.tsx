@@ -233,7 +233,7 @@ function TitularCard({ titular: t, maxDrawdown }: { titular: Titular; maxDrawdow
             rel="noopener noreferrer"
             style={{ marginLeft: 4, fontSize: 11, textDecoration: "none" }}
           >
-            ->
+            {"->"}
           </a>
         </div>
         {t.archetype && (
