@@ -145,21 +145,42 @@ class ScalperPoolSelector:
         """Write selected titulars to scalper_pool with V2 columns."""
         from src.strategies.scalper.titular_risk import compute_risk_config
 
+        # Retire previous active titulars not in the new selection
+        new_wallets = {c.wallet for c in candidates}
+        client = db._db.get_client()
+        try:
+            old_rows = (
+                client.table("scalper_pool")
+                .select("wallet_address")
+                .eq("run_id", self._run_id)
+                .eq("status", "ACTIVE_TITULAR")
+                .execute()
+            ).data or []
+            for row in old_rows:
+                w = row["wallet_address"]
+                if w not in new_wallets:
+                    client.table("scalper_pool").update({"status": "POOL"}).eq(
+                        "run_id", self._run_id
+                    ).eq("wallet_address", w).execute()
+                    logger.info(f"  retired old titular {w[:10]}…")
+        except Exception as e:
+            logger.warning(f"persist_selection: retire old titulars failed: {e}")
+
+        alloc_pct = round(1.0 / len(candidates), 6)
         for cand in candidates:
             risk_cfg = compute_risk_config(cand.profile)
-            db.update_scalper_status(
-                cand.wallet, "ACTIVE_TITULAR", capital_usd=0, run_id=self._run_id,
-            )
-            db.update_scalper_pool_fields(
+            db.upsert_scalper_pool_entry(
                 cand.wallet,
                 {
+                    "status": "ACTIVE_TITULAR",
+                    "capital_allocated_usd": 0,
                     "approved_market_types": cand.approved_types,
                     "composite_score": cand.best_score,
                     "per_trader_loss_limit": risk_cfg["per_trader_loss_limit"],
                     "per_trader_consecutive_losses": 0,
                     "per_trader_is_broken": False,
                     "consecutive_wins": 0,
-                    "allocation_pct": 1.0 / len(candidates),
+                    "allocation_pct": alloc_pct,
                 },
                 run_id=self._run_id,
             )

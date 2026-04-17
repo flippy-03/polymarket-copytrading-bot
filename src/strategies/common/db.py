@@ -268,6 +268,18 @@ def update_scalper_status(address: str, status: str, capital_usd: float = 0, *, 
     )
 
 
+def upsert_scalper_pool_entry(wallet: str, data: dict, *, run_id: str) -> None:
+    """Insert or update a scalper_pool row (safe for new wallets)."""
+    client = _db.get_client()
+    row = {"run_id": run_id, "wallet_address": wallet, **data}
+    try:
+        client.table("scalper_pool").upsert(
+            row, on_conflict="run_id,wallet_address"
+        ).execute()
+    except Exception as e:
+        logger.warning(f"upsert_scalper_pool_entry({wallet[:10]}): {e}")
+
+
 # ── copy_trades ──────────────────────────────────────────
 
 def open_copy_trade(row: dict) -> str:
