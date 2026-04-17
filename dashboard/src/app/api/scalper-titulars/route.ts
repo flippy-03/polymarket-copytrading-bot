@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     )
     .eq("run_id", runId)
     .eq("status", "ACTIVE_TITULAR");
-  const poolRows = (poolRowsRaw ?? []) as PoolRow[];
+  const poolRows = (poolRowsRaw ?? []) as unknown as PoolRow[];
 
   // Fetch portfolio state
   const { data: portfolio } = await supabase
