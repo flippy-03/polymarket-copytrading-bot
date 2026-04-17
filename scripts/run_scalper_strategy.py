@@ -30,7 +30,7 @@ def cmd_select_pool() -> None:
     selector.persist_selection(candidates)
     logger.info(f"select_pool: {len(candidates)} titulars persisted")
     for c in candidates:
-        logger.info(f"  {c['wallet'][:10]}… types={c['approved_market_types']} score={c['composite_score']:.3f}")
+        logger.info(f"  {c.wallet[:10]}… types={c.approved_types} score={c.best_score:.3f}")
 
 
 def cmd_run() -> None:
