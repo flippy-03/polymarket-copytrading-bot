@@ -16,6 +16,7 @@ so we can evaluate pure signal quality independent of execution constraints.
 
 Live mode is not implemented yet — keep PAPER_MODE=true.
 """
+import json
 import httpx
 
 from src.strategies.common import config as C
@@ -310,3 +311,137 @@ def evaluate_shadow_stops(strategy: str, *, run_id: str) -> int:
             db.close_shadow_stops(t["id"], round(price, 4), pnl_usd, pnl_pct, reason)
             frozen += 1
     return frozen
+
+
+# ── Market resolution detection ──────────────────────────────────────────────
+
+def get_clob_market(condition_id: str) -> dict | None:
+    """
+    Fetch market metadata from the CLOB `/markets/{condition_id}` endpoint.
+
+    Returns a dict with at least: closed (bool), tokens (list of
+    {token_id, outcome, price, winner}).  Returns None on any error.
+
+    Unlike the Gamma API `/markets?condition_id=…` (which ignores the filter
+    and returns unrelated markets), the CLOB path does an exact lookup.
+    """
+    try:
+        r = _clob.get(f"/markets/{condition_id}")
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        logger.debug(f"get_clob_market({condition_id[:12]}…): {e}")
+        return None
+
+
+def _get_resolution_price(clob_market: dict, outcome_token_id: str) -> float | None:
+    """
+    Extract the settled price for a specific token from a resolved CLOB market.
+
+    CLOB format: market["tokens"] = [{"token_id": "...", "price": 1, "winner": true}, ...]
+    Returns 1.0 (winner) / 0.0 (loser), or None if token not found.
+    """
+    for token in clob_market.get("tokens") or []:
+        tid = token.get("token_id") or token.get("tokenId")
+        if tid == outcome_token_id:
+            p = token.get("price")
+            if p is not None:
+                return float(p)
+    return None
+
+
+def _close_real_at_price(trade_id: str, exit_price: float, reason: str) -> None:
+    """Close a real (non-shadow) trade at a known price without querying CLOB."""
+    from src.db import supabase_client as _sdb
+    client = _sdb.get_client()
+    _COLS = (
+        "id,status,is_shadow,outcome_token_id,shares,"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+    )
+    result = client.table("copy_trades").select(_COLS).eq("id", trade_id).limit(1).execute()
+    if not result.data:
+        return
+    t = result.data[0]
+    if t["status"] != "OPEN" or t.get("is_shadow"):
+        return
+    pnl_usd, pnl_pct = _pnl(float(t["shares"]), float(t["entry_price"]), exit_price, float(t["position_usd"]))
+    db.close_copy_trade(trade_id, round(exit_price, 4), pnl_usd, pnl_pct, reason)
+    db.apply_trade_to_portfolio(t["strategy"], pnl_usd, is_win=pnl_usd > 0, run_id=t["run_id"], is_shadow=False)
+    _decrement_open_positions(t["strategy"], t["run_id"], False)
+    risk.update_peak_capital(t["strategy"], run_id=t["run_id"])
+    risk.register_loss_and_maybe_break(t["strategy"], pnl_pct, run_id=t["run_id"])
+    logger.info(
+        f"[{t['strategy']}] RESOLVED {trade_id[:8]} @ {exit_price:.3f} "
+        f"PnL=${pnl_usd:.2f} ({pnl_pct:+.1%}) — {reason}"
+    )
+
+
+def _close_shadow_at_price(trade_id: str, exit_price: float, reason: str) -> None:
+    """Close a shadow trade at a known price without querying CLOB."""
+    from src.db import supabase_client as _sdb
+    client = _sdb.get_client()
+    _COLS = (
+        "id,status,is_shadow,outcome_token_id,shares,"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+    )
+    result = client.table("copy_trades").select(_COLS).eq("id", trade_id).limit(1).execute()
+    if not result.data:
+        return
+    t = result.data[0]
+    if t["status"] != "OPEN" or not t.get("is_shadow"):
+        return
+    pnl_usd, pnl_pct = _pnl(float(t["shares"]), float(t["entry_price"]), exit_price, float(t["position_usd"]))
+    db.close_shadow_pure(trade_id, round(exit_price, 4), pnl_usd, pnl_pct, reason)
+    freshened = client.table("copy_trades").select("pnl_usd").eq("id", trade_id).limit(1).execute().data
+    realized = float((freshened[0].get("pnl_usd") if freshened else None) or pnl_usd)
+    db.apply_trade_to_portfolio(t["strategy"], realized, is_win=realized > 0, run_id=t["run_id"], is_shadow=True)
+    _decrement_open_positions(t["strategy"], t["run_id"], True)
+    logger.info(f"[{t['strategy']}] RESOLVED shadow {trade_id[:8]} @ {exit_price:.3f} — {reason}")
+
+
+def resolve_expired_trades(strategy: str, *, run_id: str) -> int:
+    """
+    Detect positions whose underlying market has resolved (closed=true on CLOB)
+    and close them at the settlement price (1.0 winner / 0.0 loser).
+
+    This handles the case where a titular wallet never explicitly SELLs — they
+    simply wait for market expiration and the tokens redeem automatically.
+    Without this check such positions would stay OPEN forever.
+
+    Uses CLOB /markets/{conditionId} for exact lookup (unlike Gamma API which
+    ignores the condition_id filter and returns unrelated markets).
+
+    Batches CLOB calls by condition_id. Returns the number of trades closed.
+    """
+    open_real = db.list_open_trades(strategy, run_id=run_id, is_shadow=False)
+    open_shadow = db.list_open_trades(strategy, run_id=run_id, is_shadow=True)
+    if not open_real and not open_shadow:
+        return 0
+
+    # Group by market so we only call CLOB once per condition_id
+    by_market: dict[str, list[dict]] = {}
+    for t in open_real + open_shadow:
+        cid = t.get("market_polymarket_id")
+        if cid:
+            by_market.setdefault(cid, []).append(t)
+
+    closed_count = 0
+    for cid, trades in by_market.items():
+        market = get_clob_market(cid)
+        if not market or not market.get("closed"):
+            continue
+
+        logger.info(f"  resolve: market {cid[:12]}… is closed — settling {len(trades)} trade(s)")
+        for t in trades:
+            token_id = t.get("outcome_token_id")
+            res_price = _get_resolution_price(market, token_id)
+            if res_price is None:
+                logger.warning(f"  resolve: no price for token {(token_id or '')[:8]}… in {cid[:12]}…")
+                continue
+            if t.get("is_shadow"):
+                _close_shadow_at_price(t["id"], res_price, "MARKET_RESOLVED")
+            else:
+                _close_real_at_price(t["id"], res_price, "MARKET_RESOLVED")
+            closed_count += 1
+
+    return closed_count

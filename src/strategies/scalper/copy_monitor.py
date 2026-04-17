@@ -5,6 +5,12 @@ mirrors them proportionally via the scalper_executor.
 Close behaviour: when a titular sells out of an asset that we are copying, we
 close our paper trade. On every tick, virtual stop-loss / take-profit is
 evaluated on OPEN shadow trades via the executor.
+
+Resolution detection: every RESOLUTION_CHECK_EVERY ticks the monitor queries
+Gamma API for each open position's market. If a market has resolved (closed=true)
+the position is settled at 1.0 (win) or 0.0 (loss) without requiring an
+explicit SELL from the titular — sports/binary markets often resolve by
+expiration rather than an on-chain sell.
 """
 import time
 from datetime import datetime, timezone
@@ -13,6 +19,9 @@ from src.strategies.common import clob_exec, config as C, db
 from src.strategies.common.data_client import DataClient
 from src.strategies.scalper.scalper_executor import ScalperExecutor
 from src.utils.logger import logger
+
+# Check for market resolution every N ticks (avoids hammering CLOB on every tick).
+RESOLUTION_CHECK_EVERY = 5
 
 
 class ScalperCopyMonitor:
@@ -24,6 +33,7 @@ class ScalperCopyMonitor:
         self.executor = ScalperExecutor(data=self.data, run_id=self.run_id)
         self.titulars: set[str] = set()
         self.last_seen: dict[str, int] = {}
+        self._tick = 0
 
     def close(self):
         self.executor.close()
@@ -74,6 +84,7 @@ class ScalperCopyMonitor:
         return list(reversed(trades))
 
     def iterate_once(self) -> None:
+        self._tick += 1
         for wallet in list(self.titulars):
             trades = self._poll(wallet)
             for trade in trades:
@@ -84,6 +95,12 @@ class ScalperCopyMonitor:
                     self.executor.mirror_close(wallet, trade)
             time.sleep(0.1)
         clob_exec.evaluate_shadow_stops(self.STRATEGY, run_id=self.run_id)
+        # Check for market resolution periodically — handles sports/binary markets
+        # that settle by expiration rather than an explicit titular SELL.
+        if self._tick % RESOLUTION_CHECK_EVERY == 0:
+            n = clob_exec.resolve_expired_trades(self.STRATEGY, run_id=self.run_id)
+            if n:
+                logger.info(f"ScalperCopyMonitor: resolved {n} expired trade(s)")
 
     def run_forever(self, refresh_every: int = 30) -> None:
         logger.info(f"ScalperCopyMonitor starting… run={self.run_id[:8]}")

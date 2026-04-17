@@ -86,12 +86,20 @@ class PositionManager:
         if entry_price <= 0 or not token_id:
             return None
 
-        # ── Resolution check ──────────────────────────────────
+        # ── Resolution check via CLOB ─────────────────────────
+        # Use CLOB /markets/{conditionId} for exact lookup. The Gamma API
+        # /markets?condition_id=… ignores the filter and returns unrelated
+        # markets, making it unreliable for resolution detection.
         try:
-            mkt = self._gamma.get_market(cid)
+            mkt = clob_exec.get_clob_market(cid)
             if mkt and mkt.get("closed"):
-                clob_exec.close_paper_trade(trade_id, "RESOLVED")
-                return ClosureEvent(trade_id, "RESOLVED", universe, cid)
+                res_price = clob_exec._get_resolution_price(mkt, token_id)
+                if res_price is not None:
+                    clob_exec._close_real_at_price(trade_id, res_price, "MARKET_RESOLVED")
+                else:
+                    # Fallback: close at current CLOB price (may be 0 for resolved markets)
+                    clob_exec.close_paper_trade(trade_id, "MARKET_RESOLVED")
+                return ClosureEvent(trade_id, "MARKET_RESOLVED", universe, cid)
         except Exception as e:
             logger.debug(f"  position_manager: resolution check {trade_id[:8]}: {e}")
 
