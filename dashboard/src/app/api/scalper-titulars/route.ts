@@ -15,8 +15,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ titulars: [], balance: null });
   }
 
+  type PoolRow = Record<string, unknown>;
+
   // Fetch active titulars from scalper_pool
-  const { data: poolRows } = await supabase
+  const { data: poolRowsRaw } = await supabase
     .from("scalper_pool")
     .select(
       "wallet_address, status, composite_score, approved_market_types, " +
@@ -25,6 +27,7 @@ export async function GET(request: Request) {
     )
     .eq("run_id", runId)
     .eq("status", "ACTIVE_TITULAR");
+  const poolRows = (poolRowsRaw ?? []) as PoolRow[];
 
   // Fetch portfolio state
   const { data: portfolio } = await supabase
@@ -39,7 +42,7 @@ export async function GET(request: Request) {
   const currentCapital = Number(portfolio?.current_capital ?? 1000);
   const initialCapital = Number(portfolio?.initial_capital ?? 1000);
   const peakCapital = Number(portfolio?.peak_capital ?? currentCapital);
-  const numTitulars = (poolRows ?? []).length || 4;
+  const numTitulars = poolRows.length || 4;
 
   // Fetch open trades per titular
   const { data: openTrades } = await supabase
@@ -82,7 +85,7 @@ export async function GET(request: Request) {
   );
 
   // Build titular detail objects
-  const titulars = (poolRows ?? []).map((row) => {
+  const titulars = poolRows.map((row) => {
     const wallet = row.wallet_address as string;
     const exposure = exposureByWallet[wallet] || { total: 0, count: 0, byType: {} };
     const allocPct = Number(row.allocation_pct ?? 1 / numTitulars);
