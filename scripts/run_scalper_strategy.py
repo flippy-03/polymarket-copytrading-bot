@@ -17,7 +17,12 @@ from src.utils.logger import logger
 
 
 def cmd_select_pool() -> None:
-    selector = ScalperPoolSelector()
+    from src.strategies.common import db
+    run_id = db.get_active_run("SCALPER")
+    if not run_id:
+        logger.error("select_pool: no active SCALPER run found — create one first")
+        return
+    selector = ScalperPoolSelector(run_id=run_id)
     candidates = selector.select()
     if not candidates:
         logger.warning("select_pool: no eligible candidates found in wallet_profiles")
