@@ -268,8 +268,20 @@ def update_scalper_status(address: str, status: str, capital_usd: float = 0, *, 
     )
 
 
+def ensure_wallet(address: str) -> None:
+    """Ensure address exists in wallets table (FK parent for scalper_pool)."""
+    client = _db.get_client()
+    try:
+        client.table("wallets").upsert(
+            {"address": address}, on_conflict="address"
+        ).execute()
+    except Exception as e:
+        logger.warning(f"ensure_wallet({address[:10]}): {e}")
+
+
 def upsert_scalper_pool_entry(wallet: str, data: dict, *, run_id: str) -> None:
     """Insert or update a scalper_pool row (safe for new wallets)."""
+    ensure_wallet(wallet)
     client = _db.get_client()
     row = {"run_id": run_id, "wallet_address": wallet, **data}
     try:
