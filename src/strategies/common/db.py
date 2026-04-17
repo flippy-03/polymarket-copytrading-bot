@@ -758,3 +758,262 @@ def list_scalper_pool_addresses(run_id: str) -> list[dict]:
     except Exception as e:
         logger.warning(f"list_scalper_pool_addresses: {e}")
         return []
+
+
+# ── Scalper V2 helpers ──────────────────────────────────────────────────────
+
+
+def get_scalper_pool_entry(wallet: str, *, run_id: str) -> dict | None:
+    """Single scalper_pool row for a wallet in a run."""
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("scalper_pool")
+            .select("*")
+            .eq("run_id", run_id)
+            .eq("wallet_address", wallet)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.warning(f"get_scalper_pool_entry: {e}")
+        return None
+
+
+def update_scalper_pool_fields(wallet: str, data: dict, *, run_id: str) -> None:
+    """Update arbitrary columns on a scalper_pool row."""
+    client = _db.get_client()
+    try:
+        client.table("scalper_pool").update(data).eq(
+            "run_id", run_id
+        ).eq("wallet_address", wallet).execute()
+    except Exception as e:
+        logger.warning(f"update_scalper_pool_fields: {e}")
+
+
+def list_open_trades_for_titular(
+    titular_wallet: str, *, run_id: str, is_shadow: bool = False
+) -> list[dict]:
+    """Open trades for a specific titular (source_wallet)."""
+    client = _db.get_client()
+    try:
+        return (
+            client.table("copy_trades")
+            .select("id, position_usd, entry_price, outcome_token_id, market_type, metadata")
+            .eq("run_id", run_id)
+            .eq("strategy", "SCALPER")
+            .eq("status", "OPEN")
+            .eq("is_shadow", is_shadow)
+            .eq("source_wallet", titular_wallet)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.warning(f"list_open_trades_for_titular: {e}")
+        return []
+
+
+# ── Cooldown CRUD ───────────────────────────────────────────────────────────
+
+
+def insert_cooldown(
+    wallet: str,
+    market_type: str,
+    reason: str,
+    expires_at: str,
+    escalation_level: int = 1,
+    metrics_at_removal: dict | None = None,
+) -> None:
+    """Insert a new cooldown. Deactivates any existing active cooldown for the
+    same (wallet, market_type) first."""
+    client = _db.get_client()
+    try:
+        # Deactivate existing
+        client.table("scalper_cooldowns").update({"is_active": False}).eq(
+            "wallet_address", wallet
+        ).eq("market_type", market_type).eq("is_active", True).execute()
+        # Insert new
+        client.table("scalper_cooldowns").insert({
+            "wallet_address": wallet,
+            "market_type": market_type,
+            "reason": reason,
+            "expires_at": expires_at,
+            "escalation_level": escalation_level,
+            "is_active": True,
+            "metrics_at_removal": metrics_at_removal,
+        }).execute()
+    except Exception as e:
+        logger.warning(f"insert_cooldown: {e}")
+
+
+def get_active_cooldown(wallet: str, market_type: str) -> dict | None:
+    """Return the active cooldown for a (wallet, market_type), if any."""
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("scalper_cooldowns")
+            .select("*")
+            .eq("wallet_address", wallet)
+            .eq("market_type", market_type)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.warning(f"get_active_cooldown: {e}")
+        return None
+
+
+def list_active_cooldowns() -> list[dict]:
+    """All currently active cooldowns."""
+    client = _db.get_client()
+    try:
+        return (
+            client.table("scalper_cooldowns")
+            .select("wallet_address, market_type, expires_at, escalation_level, reason")
+            .eq("is_active", True)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.warning(f"list_active_cooldowns: {e}")
+        return []
+
+
+def deactivate_cooldown(cooldown_id: str) -> None:
+    client = _db.get_client()
+    try:
+        client.table("scalper_cooldowns").update(
+            {"is_active": False}
+        ).eq("id", cooldown_id).execute()
+    except Exception as e:
+        logger.warning(f"deactivate_cooldown: {e}")
+
+
+def count_cooldown_history(wallet: str, market_type: str) -> int:
+    """Count all cooldowns (active + expired) for a (wallet, market_type) pair.
+    Used to determine escalation level."""
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("scalper_cooldowns")
+            .select("id", count="exact")
+            .eq("wallet_address", wallet)
+            .eq("market_type", market_type)
+            .execute()
+        )
+        return rows.count or 0
+    except Exception as e:
+        logger.warning(f"count_cooldown_history: {e}")
+        return 0
+
+
+# ── Scalper config CRUD ─────────────────────────────────────────────────────
+
+
+def get_scalper_config(run_id: str) -> dict:
+    """Return the scalper config dict for a run, or defaults."""
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("scalper_config")
+            .select("config")
+            .eq("run_id", run_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return rows[0]["config"] if rows else {}
+    except Exception as e:
+        logger.warning(f"get_scalper_config: {e}")
+        return {}
+
+
+def upsert_scalper_config(run_id: str, config: dict) -> None:
+    client = _db.get_client()
+    try:
+        client.table("scalper_config").upsert(
+            {"run_id": run_id, "config": config, "updated_at": "now()"},
+            on_conflict="run_id",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"upsert_scalper_config: {e}")
+
+
+# ── Roadmap snapshot ────────────────────────────────────────────────────────
+
+
+def insert_roadmap_snapshot(content: dict, version: str | None = None) -> None:
+    client = _db.get_client()
+    try:
+        client.table("roadmap_snapshots").insert({
+            "content": content,
+            "version": version,
+        }).execute()
+    except Exception as e:
+        logger.warning(f"insert_roadmap_snapshot: {e}")
+
+
+def get_latest_roadmap_snapshot() -> dict | None:
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("roadmap_snapshots")
+            .select("*")
+            .order("snapshot_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.warning(f"get_latest_roadmap_snapshot: {e}")
+        return None
+
+
+# ── Eligible scalper candidates (wallet_profiles query) ─────────────────────
+
+
+def list_eligible_scalper_candidates(
+    cooldown_wallets: set[str] | None = None,
+    min_confidence: list[str] | None = None,
+    min_last_30d_trades: int = 5,
+    limit: int = 100,
+) -> list[dict]:
+    """Fetch enriched wallet profiles eligible for scalper titular selection.
+
+    Returns profiles with confidence HIGH/MEDIUM, recently active, not in
+    cooldown set. Ordered by priority_score DESC.
+    """
+    if min_confidence is None:
+        min_confidence = ["HIGH", "MEDIUM"]
+    client = _db.get_client()
+    try:
+        q = (
+            client.table("wallet_profiles")
+            .select(
+                "wallet, profile_confidence, type_hit_rates, type_profit_factors, "
+                "type_trade_counts, type_sharpe_ratios, worst_30d_hit_rate, "
+                "hit_rate_variance, momentum_score, sharpe_proxy, "
+                "last_30d_trades, last_7d_trades, hit_rate_trend, "
+                "best_type_hit_rate, typical_n_simultaneous, estimated_portfolio_usd, "
+                "primary_archetype, rarity_tier"
+            )
+            .in_("profile_confidence", min_confidence)
+            .gte("last_30d_trades", min_last_30d_trades)
+            .order("priority_score", desc=True)
+            .limit(limit)
+        )
+        rows = q.execute().data or []
+        if cooldown_wallets:
+            rows = [r for r in rows if r["wallet"] not in cooldown_wallets]
+        return rows
+    except Exception as e:
+        logger.warning(f"list_eligible_scalper_candidates: {e}")
+        return []

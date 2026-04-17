@@ -166,3 +166,55 @@ def position_size(strategy: str, *, run_id: str, max_pct: float = C.MAX_PER_TRAD
     if not p:
         return 0.0
     return round(float(p["current_capital"]) * max_pct, 2)
+
+
+# ── Per-titular risk (Scalper V2) ────────────────────────────────────────────
+
+def register_titular_loss(wallet: str, loss_pct: float, *, run_id: str) -> None:
+    """Track per-titular consecutive losses on scalper_pool.
+
+    Resets streak on wins. Trips per-titular CB when limit reached.
+    Also increments the global consecutive_losses counter.
+    """
+    entry = db.get_scalper_pool_entry(wallet, run_id=run_id)
+    if not entry:
+        return
+
+    # Win or scratch (better than -2%) → reset streak, increment wins
+    if loss_pct >= -0.02:
+        db.update_scalper_pool_fields(wallet, {
+            "per_trader_consecutive_losses": 0,
+            "consecutive_wins": int(entry.get("consecutive_wins") or 0) + 1,
+        }, run_id=run_id)
+        return
+
+    # Loss → increment streak, reset wins
+    losses = int(entry.get("per_trader_consecutive_losses") or 0) + 1
+    limit = int(entry.get("per_trader_loss_limit") or 4)
+    data: dict = {
+        "per_trader_consecutive_losses": losses,
+        "consecutive_wins": 0,
+    }
+    if losses >= limit:
+        data["per_trader_is_broken"] = True
+        logger.warning(
+            f"[SCALPER] Per-titular CB — {wallet[:10]}… hit {losses} "
+            f"consecutive losses (limit={limit}). Pausing this titular."
+        )
+    db.update_scalper_pool_fields(wallet, data, run_id=run_id)
+
+
+def is_titular_broken(wallet: str, *, run_id: str) -> bool:
+    """Check if a specific titular is in per-trader circuit breaker."""
+    entry = db.get_scalper_pool_entry(wallet, run_id=run_id)
+    if not entry:
+        return False
+    return bool(entry.get("per_trader_is_broken", False))
+
+
+def reset_titular_streak(wallet: str, *, run_id: str) -> None:
+    """Manually reset a titular's loss streak (e.g. after health-check review)."""
+    db.update_scalper_pool_fields(wallet, {
+        "per_trader_consecutive_losses": 0,
+        "per_trader_is_broken": False,
+    }, run_id=run_id)

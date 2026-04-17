@@ -1,18 +1,20 @@
 """
-Scalper Executor — mirror-opens and mirror-closes paper trades against the
-titular wallets' live activity. Sizing is 5-10% of the titular trade, clamped
-to [SCALPER_MIN_PER_TRADE, SCALPER_MAX_PER_TRADE] and bounded by the strategy
-capital share assigned to that titular.
+Scalper V2 Executor — mirror-opens and mirror-closes paper trades against
+titular wallets' live activity.
 
-Every real trade is mirrored by a shadow trade (fixed $100, no risk gating).
-Shadow stops are evaluated on every tick via clob_exec.evaluate_shadow_stops.
+Key V2 changes vs V1:
+  - Sizing via PortfolioSizer (% of OUR portfolio, not titular's trade)
+  - market_type classification and storage on every trade
+  - Per-titular risk tracking (register_titular_loss on close)
+  - Shadow trades when allocation exhausted or risk blocked
 """
-import random
-
 from src.db import supabase_client as _db
 from src.strategies.common import clob_exec, config as C, db
+from src.strategies.common import risk_manager_ct as risk
 from src.strategies.common.data_client import DataClient
 from src.strategies.common.wallet_analyzer import _usdc
+from src.strategies.scalper.portfolio_sizer import PortfolioSizer
+from src.strategies.specialist.market_type_classifier import classify
 from src.utils.logger import logger
 
 
@@ -23,29 +25,41 @@ class ScalperExecutor:
         self.data = data or DataClient()
         self._owns_data = data is None
         self.run_id = run_id or db.get_active_run(self.STRATEGY)
+        self._sizer = PortfolioSizer(run_id=self.run_id)
         db.ensure_portfolio_row(
             self.STRATEGY, run_id=self.run_id, is_shadow=False,
-            initial_capital=C.SCALPER_INITIAL_CAPITAL, max_open_positions=C.MAX_OPEN_POSITIONS,
+            initial_capital=C.SCALPER_INITIAL_CAPITAL,
+            max_open_positions=C.SCALPER_MAX_OPEN_POSITIONS,
         )
         db.ensure_portfolio_row(
             self.STRATEGY, run_id=self.run_id, is_shadow=True,
-            initial_capital=C.SCALPER_INITIAL_CAPITAL, max_open_positions=C.MAX_OPEN_POSITIONS,
+            initial_capital=C.SCALPER_INITIAL_CAPITAL,
+            max_open_positions=C.SCALPER_MAX_OPEN_POSITIONS,
         )
 
     def close(self):
         if self._owns_data:
             self.data.close()
 
-    # ── sizing ───────────────────────────────────────────
-
-    def _copy_size(self, titular_usdc: float) -> float:
-        ratio = random.uniform(C.SCALPER_COPY_RATIO_MIN, C.SCALPER_COPY_RATIO_MAX)
-        raw = titular_usdc * ratio
-        return max(C.SCALPER_MIN_PER_TRADE, min(raw, C.SCALPER_MAX_PER_TRADE))
-
     # ── open ─────────────────────────────────────────────
 
-    def mirror_open(self, titular: str, trade: dict) -> dict | None:
+    def mirror_open(
+        self,
+        titular: str,
+        trade: dict,
+        *,
+        force_shadow: bool = False,
+        shadow_reason: str | None = None,
+    ) -> dict | None:
+        """Mirror a BUY trade from a titular.
+
+        Args:
+            force_shadow: If True, open as shadow regardless of risk checks.
+            shadow_reason: Metadata reason when forced to shadow.
+
+        Returns:
+            Result dict from open_paper_trade, or None if skipped.
+        """
         cid = trade.get("conditionId")
         asset = trade.get("asset")
         if not cid or not asset:
@@ -53,54 +67,70 @@ class ScalperExecutor:
 
         outcome = (trade.get("outcome") or "").strip()
         direction = "YES" if outcome.lower().startswith("y") else "NO"
-        # Use shared fallback so trades without usdcSize still mirror correctly.
-        titular_usdc = _usdc(trade)
-        size_usd = round(self._copy_size(titular_usdc), 2)
-        if size_usd < C.SCALPER_MIN_PER_TRADE:
-            return None
+        market_type = classify(trade)
 
-        # Dedupe against OPEN real trades for the same (titular, asset) within this run.
-        client = _db.get_client()
-        existing = (
-            client.table("copy_trades")
-            .select("id")
-            .eq("run_id", self.run_id)
-            .eq("strategy", self.STRATEGY)
-            .eq("status", "OPEN")
-            .eq("is_shadow", False)
-            .eq("source_wallet", titular)
-            .eq("outcome_token_id", asset)
-            .limit(1)
-            .execute()
-            .data
-        )
-        if existing:
-            return None
+        # Compute portfolio-relative size
+        size_usd = self._sizer.compute_trade_size(titular)
+
+        # If allocation exhausted, force shadow
+        if size_usd <= 0:
+            force_shadow = True
+            shadow_reason = shadow_reason or "allocation_exhausted"
+
+        if size_usd <= 0:
+            # Use a nominal size for shadow trades
+            size_usd = 50.0
+
+        # Dedupe: skip if already OPEN real trade for same (titular, asset)
+        if not force_shadow:
+            client = _db.get_client()
+            existing = (
+                client.table("copy_trades")
+                .select("id")
+                .eq("run_id", self.run_id)
+                .eq("strategy", self.STRATEGY)
+                .eq("status", "OPEN")
+                .eq("is_shadow", False)
+                .eq("source_wallet", titular)
+                .eq("outcome_token_id", asset)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if existing:
+                return None
+
+        metadata = {
+            "titular": titular,
+            "titular_usdc": _usdc(trade),
+            "titular_price": float(trade.get("price") or 0),
+            "market_type": market_type,
+        }
+        if force_shadow and shadow_reason:
+            metadata["filter_reason"] = shadow_reason
 
         return clob_exec.open_paper_trade(
             strategy=self.STRATEGY,
             market_polymarket_id=cid,
             outcome_token_id=asset,
             direction=direction,
-            size_usd=size_usd,
+            size_usd=round(size_usd, 2),
             run_id=self.run_id,
             source_wallet=titular,
             market_question=trade.get("title") or trade.get("question"),
             market_category=None,
-            metadata={
-                "titular": titular,
-                "titular_usdc": titular_usdc,
-                "titular_price": float(trade.get("price") or 0),
-            },
+            metadata=metadata,
         )
 
     # ── close ────────────────────────────────────────────
 
     def mirror_close(self, titular: str, trade: dict) -> int:
+        """Close all open trades for a titular + asset when they SELL."""
         asset = trade.get("asset")
         if not asset:
             return 0
         client = _db.get_client()
+
         # Close real trades
         real_rows = (
             client.table("copy_trades")
@@ -116,7 +146,8 @@ class ScalperExecutor:
         )
         for r in real_rows:
             clob_exec.close_paper_trade(r["id"], reason="SCALPER_TITULAR_EXIT")
-        # Close shadow trades (pure side) for the same titular/asset
+
+        # Close shadow trades (pure side)
         shadow_rows = (
             client.table("copy_trades")
             .select("id")
@@ -131,6 +162,7 @@ class ScalperExecutor:
         )
         for r in shadow_rows:
             clob_exec.close_shadow_trade(r["id"], reason="SCALPER_TITULAR_EXIT")
+
         return len(real_rows) + len(shadow_rows)
 
     # ── tick-level shadow stops ──────────────────────────

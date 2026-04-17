@@ -84,6 +84,15 @@ if [ ! -f /etc/systemd/system/polymarket-profile-enricher.service ]; then
   systemctl enable polymarket-profile-enricher
   echo "  unit polymarket-profile-enricher instalado y habilitado"
 fi
+# Instalar roadmap updater timer si no existe aún
+if [ ! -f /etc/systemd/system/polymarket-roadmap-updater.timer ]; then
+  cp deploy/polymarket-roadmap-updater.service /etc/systemd/system/polymarket-roadmap-updater.service
+  cp deploy/polymarket-roadmap-updater.timer /etc/systemd/system/polymarket-roadmap-updater.timer
+  systemctl daemon-reload
+  systemctl enable polymarket-roadmap-updater.timer
+  systemctl start polymarket-roadmap-updater.timer
+  echo "  timer polymarket-roadmap-updater instalado (daily 06:00 UTC)"
+fi
 # Reiniciar servicios activos
 systemctl restart polymarket-scalper 2>/dev/null && echo "  polymarket-scalper restarted" || echo "  polymarket-scalper: no instalado"
 systemctl restart polymarket-specialist 2>/dev/null && echo "  polymarket-specialist restarted" || echo "  polymarket-specialist: no instalado"

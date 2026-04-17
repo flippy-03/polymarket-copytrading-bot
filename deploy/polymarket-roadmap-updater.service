@@ -1,0 +1,13 @@
+[Unit]
+Description=Polymarket Roadmap Snapshot Updater
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/polymarket-copytrading-bot
+ExecStart=/opt/polymarket-copytrading-bot/venv/bin/python scripts/update_roadmap_snapshot.py --once
+Environment=PYTHONPATH=/opt/polymarket-copytrading-bot
+
+[Install]
+WantedBy=multi-user.target

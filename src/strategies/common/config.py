@@ -75,18 +75,33 @@ BASKET_MONITOR_INTERVAL_SECONDS = 60
 BASKET_POOL_CANDIDATES = 80        # candidates to analyze per basket (was hardcoded 50)
 BASKET_MIN_CATEGORY_PNL_PCT = 0.35 # specialist filter: ≥35% of PnL from basket category
 
-# ── Scalper strategy ─────────────────────────────────────
-SCALPER_ACTIVE_WALLETS = 3
+# ── Scalper strategy (V2 — profile-based) ────────────────
+SCALPER_ACTIVE_WALLETS = 4
 SCALPER_POOL_SIZE = 12
+SCALPER_MONITOR_INTERVAL_SECONDS = 30
+SCALPER_CONSECUTIVE_LOSS_LIMIT = 6      # global CB: 6 total cross-titular losses
+
+# V2 selection & sizing
+SCALPER_MIN_HIT_RATE = 0.55             # min type HR for (wallet, market_type) pairs
+SCALPER_MIN_TRADE_COUNT = 8             # min trades per type for statistical significance
+SCALPER_TRADE_PCT = 0.15                # 15% of titular allocation per trade
+SCALPER_MAX_TRADE_PCT = 0.25            # max 25% of allocation on single trade
+SCALPER_MIN_PER_TRADE = 5               # floor in USD
+SCALPER_BONUS_PCT = 0.05                # +5% allocation for titulars with 3+ consecutive wins
+SCALPER_MAX_OPEN_POSITIONS = 16         # global sanity cap (capital is the real limit)
+
+# V2 rotation & cooldown
+SCALPER_HEALTH_CHECK_HOURS = 72         # hours between health checks (no forced weekly rotation)
+SCALPER_COOLDOWN_DAYS_BASE = 30         # base cooldown for removed titulars
+SCALPER_PRIORITY_BOOST = 1.3            # composite score multiplier for priority market types
+
+# V1 legacy (kept for rotation_engine compatibility during transition)
 SCALPER_COPY_RATIO_MIN = 0.05
 SCALPER_COPY_RATIO_MAX = 0.10
 SCALPER_MAX_PER_TRADE = 100
-SCALPER_MIN_PER_TRADE = 5
 SCALPER_SHARPE_WINDOW_DAYS = 14
 SCALPER_ROTATION_DAY = "monday"
 SCALPER_ROTATION_HOUR_UTC = 0
-SCALPER_CONSECUTIVE_LOSS_LIMIT = 3
-SCALPER_MONITOR_INTERVAL_SECONDS = 30
 
 # Specialist CB: higher threshold because the strategy holds few positions
 # over multi-hour horizons — 3 losses in a row is normal variance, not a

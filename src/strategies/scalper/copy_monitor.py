@@ -1,27 +1,27 @@
 """
-Scalper Copy Monitor — polls active titular wallets, detects fresh trades and
-mirrors them proportionally via the scalper_executor.
+Scalper V2 Copy Monitor — polls titular wallets, filters by approved market
+types, and mirrors trades with portfolio-relative sizing.
 
-Close behaviour: when a titular sells out of an asset that we are copying, we
-close our paper trade. On every tick, virtual stop-loss / take-profit is
-evaluated on OPEN shadow trades via the executor.
-
-Resolution detection: every RESOLUTION_CHECK_EVERY ticks the monitor queries
-Gamma API for each open position's market. If a market has resolved (closed=true)
-the position is settled at 1.0 (win) or 0.0 (loss) without requiring an
-explicit SELL from the titular — sports/binary markets often resolve by
-expiration rather than an on-chain sell.
+Key V2 changes:
+  - Market type filtering: only copy trades in approved types per titular
+  - Trailing stop per position (reused from specialist position_manager pattern)
+  - Shadow overflow: when capital/risk is blocked, open shadow instead of skip
+  - Per-titular circuit breaker check before copying
+  - Resolution detection every RESOLUTION_CHECK_EVERY ticks
 """
 import time
 from datetime import datetime, timezone
 
 from src.strategies.common import clob_exec, config as C, db
+from src.strategies.common import risk_manager_ct as risk
 from src.strategies.common.data_client import DataClient
 from src.strategies.scalper.scalper_executor import ScalperExecutor
+from src.strategies.specialist.market_type_classifier import classify
 from src.utils.logger import logger
 
-# Check for market resolution every N ticks (avoids hammering CLOB on every tick).
 RESOLUTION_CHECK_EVERY = 5
+TRAILING_ACTIVATION = C.TS_ACTIVATION   # +8% gain
+TRAILING_TRAIL_PCT = C.TS_TRAIL_PCT     # 15% below HWM
 
 
 class ScalperCopyMonitor:
@@ -31,7 +31,7 @@ class ScalperCopyMonitor:
         self.data = DataClient()
         self.run_id = db.get_active_run(self.STRATEGY)
         self.executor = ScalperExecutor(data=self.data, run_id=self.run_id)
-        self.titulars: set[str] = set()
+        self.titulars: dict[str, dict] = {}  # wallet → pool entry (with approved_market_types)
         self.last_seen: dict[str, int] = {}
         self._tick = 0
 
@@ -40,9 +40,19 @@ class ScalperCopyMonitor:
         self.data.close()
 
     def refresh_titulars(self) -> None:
+        """Load active titulars with their approved market types from scalper_pool."""
         rows = db.list_scalper_pool(status="ACTIVE_TITULAR", run_id=self.run_id)
-        self.titulars = {r["wallet_address"] for r in rows}
-        logger.info(f"ScalperCopyMonitor tracking {len(self.titulars)} titulars")
+        self.titulars = {}
+        for r in rows:
+            wallet = r["wallet_address"]
+            self.titulars[wallet] = {
+                "approved_market_types": r.get("approved_market_types") or [],
+                "per_trader_is_broken": r.get("per_trader_is_broken", False),
+            }
+        logger.info(
+            f"ScalperCopyMonitor tracking {len(self.titulars)} titulars "
+            f"(V2 with type filtering)"
+        )
 
     def _record_observed(self, wallet: str, trades: list[dict]) -> None:
         for tr in trades:
@@ -80,30 +90,121 @@ class ScalperCopyMonitor:
             if mx > 0:
                 self.last_seen[wallet] = mx + 1
         self._record_observed(wallet, trades)
-        # Data-api returns newest first; we want chronological order for mirrored execution
         return list(reversed(trades))
+
+    def _should_copy(self, titular: str, trade: dict) -> tuple[bool, str]:
+        """Determine if a BUY trade should be copied as real or filtered.
+
+        Returns (should_copy_real, reason).
+        Reasons: "approved", "type_filtered", "titular_broken", "global_risk",
+                 "allocation_exhausted".
+        """
+        titular_info = self.titulars.get(titular, {})
+        approved_types = titular_info.get("approved_market_types", [])
+
+        # 1. Classify market type
+        market_type = classify(trade)
+
+        # 2. Check if market type is approved for this titular
+        if market_type not in approved_types:
+            return False, "type_filtered"
+
+        # 3. Check per-titular circuit breaker
+        if risk.is_titular_broken(titular, run_id=self.run_id):
+            return False, "titular_broken"
+
+        # 4. Check global risk
+        can_open, reason = risk.can_open_position(self.STRATEGY, run_id=self.run_id)
+        if not can_open:
+            return False, f"global_risk:{reason}"
+
+        return True, "approved"
+
+    def _evaluate_trailing_stops(self) -> int:
+        """Evaluate trailing stops on all open real trades."""
+        open_trades = db.list_open_trades(
+            strategy=self.STRATEGY, run_id=self.run_id, is_shadow=False,
+        )
+        closed = 0
+        for trade in open_trades:
+            trade_id = trade["id"]
+            token_id = trade.get("outcome_token_id", "")
+            entry_price = float(trade.get("entry_price") or 0)
+            metadata = trade.get("metadata") or {}
+
+            if entry_price <= 0 or not token_id:
+                continue
+
+            current_price = clob_exec.get_token_price(token_id)
+            if not current_price or current_price <= 0:
+                continue
+
+            pct_change = (current_price - entry_price) / entry_price
+            trailing_active = bool(metadata.get("trailing_active", False))
+            high_water = float(metadata.get("high_water_mark") or current_price)
+
+            # Update high-water mark
+            if current_price > high_water:
+                high_water = current_price
+                db.update_copy_trade_metadata(trade_id, {"high_water_mark": high_water})
+
+            # Activate trailing after +8% gain
+            if not trailing_active and pct_change >= TRAILING_ACTIVATION:
+                db.update_copy_trade_metadata(
+                    trade_id, {"trailing_active": True, "high_water_mark": high_water}
+                )
+                logger.info(
+                    f"  trailing ACTIVATED {trade_id[:8]}… "
+                    f"entry={entry_price:.3f} current={current_price:.3f}"
+                )
+                trailing_active = True
+
+            # Trailing stop check
+            if trailing_active:
+                trail_stop = high_water * (1 - TRAILING_TRAIL_PCT)
+                if current_price <= trail_stop:
+                    clob_exec.close_paper_trade(trade_id, "TRAILING_STOP")
+                    closed += 1
+
+        return closed
 
     def iterate_once(self) -> None:
         self._tick += 1
-        for wallet in list(self.titulars):
+        for wallet in list(self.titulars.keys()):
             trades = self._poll(wallet)
             for trade in trades:
                 side = (trade.get("side") or "").upper()
                 if side == "BUY":
-                    self.executor.mirror_open(wallet, trade)
+                    should_copy, reason = self._should_copy(wallet, trade)
+                    if should_copy:
+                        self.executor.mirror_open(wallet, trade)
+                    elif reason == "type_filtered":
+                        # Filtered by type → ignore entirely (no shadow)
+                        pass
+                    else:
+                        # Blocked by risk/capital → shadow trade
+                        self.executor.mirror_open(
+                            wallet, trade,
+                            force_shadow=True, shadow_reason=reason,
+                        )
                 elif side == "SELL":
                     self.executor.mirror_close(wallet, trade)
             time.sleep(0.1)
+
+        # Evaluate shadow stops (SL/TP on shadow trades)
         clob_exec.evaluate_shadow_stops(self.STRATEGY, run_id=self.run_id)
-        # Check for market resolution periodically — handles sports/binary markets
-        # that settle by expiration rather than an explicit titular SELL.
+
+        # Evaluate trailing stops on real trades
+        self._evaluate_trailing_stops()
+
+        # Resolution detection every N ticks
         if self._tick % RESOLUTION_CHECK_EVERY == 0:
             n = clob_exec.resolve_expired_trades(self.STRATEGY, run_id=self.run_id)
             if n:
                 logger.info(f"ScalperCopyMonitor: resolved {n} expired trade(s)")
 
     def run_forever(self, refresh_every: int = 30) -> None:
-        logger.info(f"ScalperCopyMonitor starting… run={self.run_id[:8]}")
+        logger.info(f"ScalperCopyMonitor V2 starting… run={self.run_id[:8]}")
         self.refresh_titulars()
         iteration = 0
         while True:

@@ -384,6 +384,41 @@ def _compute_coverage_kpis(
     else:
         domain_agnostic = None
 
+    # Per-type Sharpe ratio: group resolved PnL by (type, day), compute
+    # annualised Sharpe = mean(daily_pnl) / std(daily_pnl) * sqrt(365).
+    # Only for types with ≥5 resolved trades spanning ≥3 distinct days.
+    type_sharpe_ratios: dict[str, float] = {}
+    # Build daily PnL per type from already-resolved per-cid PnLs.
+    type_daily_pnl: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for cid, mkt_trades in by_cid.items():
+        first = mkt_trades[0]
+        mtype = classify(first)
+        pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open)
+        if pnl is None:
+            continue
+        # Determine the day from the first trade in this market
+        ts = int(first.get("timestamp") or 0)
+        if ts > 0:
+            day = str(ts // 86400)  # integer day bucket
+        else:
+            continue
+        type_daily_pnl[mtype][day] += pnl
+
+    for mtype, daily_map in type_daily_pnl.items():
+        if type_trade_counts.get(mtype, 0) < 5:
+            continue
+        days = list(daily_map.values())
+        if len(days) < 3:
+            continue
+        mean_pnl = sum(days) / len(days)
+        var_pnl = sum((d - mean_pnl) ** 2 for d in days) / len(days)
+        std_pnl = var_pnl ** 0.5
+        if std_pnl > 0:
+            sharpe = round((mean_pnl / std_pnl) * (365 ** 0.5), 3)
+        else:
+            sharpe = round(mean_pnl * (365 ** 0.5), 3) if mean_pnl > 0 else 0.0
+        type_sharpe_ratios[mtype] = sharpe
+
     return {
         "primary_universe": primary_universe,
         "active_universes": sorted(active_universes),
@@ -398,6 +433,7 @@ def _compute_coverage_kpis(
         "type_hit_rates": type_hit_rates or None,
         "type_profit_factors": type_profit_factors or None,
         "type_trade_counts": type_trade_counts or None,
+        "type_sharpe_ratios": type_sharpe_ratios or None,
         "domain_agnostic_score": domain_agnostic,
     }
 
