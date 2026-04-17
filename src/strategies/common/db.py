@@ -252,6 +252,26 @@ def carry_over_scalper_pool(source_run_id: str, target_run_id: str) -> int:
     return len(existing)
 
 
+def carry_over_spec_ranking(old_run_id: str, new_run_id: str) -> int:
+    """Migrate spec_ranking rows from old run to new run (UPDATE in-place).
+
+    Safe because: spec_ranking has no unique constraint, and the old run is
+    being closed so it no longer needs its own ranking rows.
+    """
+    client = _db.get_client()
+    try:
+        result = (
+            client.table("spec_ranking")
+            .update({"run_id": new_run_id})
+            .eq("run_id", old_run_id)
+            .execute()
+        )
+        return len(result.data or [])
+    except Exception as e:
+        logger.warning(f"carry_over_spec_ranking: {e}")
+        return 0
+
+
 def list_scalper_pool(status: Optional[str] = None, *, run_id: str) -> list[dict]:
     client = _db.get_client()
     q = client.table("scalper_pool").select("*").eq("run_id", run_id)
