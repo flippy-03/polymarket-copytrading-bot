@@ -1,0 +1,20 @@
+[Unit]
+Description=Polymarket Scalper V2 Copy Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/polymarket-copytrading-bot
+ExecStart=/root/polymarket-copytrading-bot/.venv/bin/python scripts/run_scalper_strategy.py --run
+EnvironmentFile=/root/polymarket-copytrading-bot/.env
+Environment=PYTHONPATH=/root/polymarket-copytrading-bot
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polymarket-scalper
+
+[Install]
+WantedBy=multi-user.target

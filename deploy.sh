@@ -70,6 +70,13 @@ if [ "$SETUP" = false ]; then
   ssh "$VPS_HOST" bash <<REMOTE
 set -e
 cd "$VPS_DIR"
+# Instalar unit scalper si no existe aún
+if [ ! -f /etc/systemd/system/polymarket-scalper.service ]; then
+  cp deploy/polymarket-scalper.service /etc/systemd/system/polymarket-scalper.service
+  systemctl daemon-reload
+  systemctl enable polymarket-scalper
+  echo "  unit polymarket-scalper instalado y habilitado"
+fi
 # Instalar unit specialist si no existe aún
 if [ ! -f /etc/systemd/system/polymarket-specialist.service ]; then
   cp deploy/polymarket-specialist.service /etc/systemd/system/polymarket-specialist.service
