@@ -35,7 +35,7 @@ from src.strategies.specialist.specialist_profiler import _cv, _is_bot_heuristic
 from src.strategies.specialist.universe_config import UNIVERSE_FOR_TYPE
 from src.utils.logger import logger
 
-ENRICHMENT_VERSION = 1
+ENRICHMENT_VERSION = 2  # v2: avg_hold_time_minutes, hr_cashpnl_confirmed_pct, SCALPER_BOT archetype
 ANALYSIS_WINDOW_DAYS = 120
 STALE_AFTER_DAYS = 7
 
@@ -265,16 +265,34 @@ def _compute_coverage_kpis(
     type_wins: dict[str, int] = defaultdict(int)
     type_gains: dict[str, float] = defaultdict(float)
     type_losses: dict[str, float] = defaultdict(float)
+    type_cashpnl_n: dict[str, int] = defaultdict(int)   # cashPnl-confirmed decisions
+    type_hold_minutes: dict[str, list] = defaultdict(list)  # hold duration per market
 
     for cid, mkt_trades in by_cid.items():
         first = mkt_trades[0]
         mtype = classify(first)
+
+        # Hold time: first BUY → last SELL (measures actual position duration)
+        sorted_t = sorted(
+            mkt_trades,
+            key=lambda t: int(t.get("timestamp") or t.get("createdAt") or 0),
+        )
+        buys = [t for t in sorted_t if t.get("side") == "BUY"]
+        sells = [t for t in sorted_t if t.get("side") == "SELL"]
+        if buys and sells:
+            first_ts = int(buys[0].get("timestamp") or buys[0].get("createdAt") or 0)
+            last_ts = int(sells[-1].get("timestamp") or sells[-1].get("createdAt") or 0)
+            if 0 < first_ts < last_ts:
+                type_hold_minutes[mtype].append((last_ts - first_ts) / 60.0)
+
         win = _infer_win(cid, mkt_trades, pos_pnl, pos_open)
         if win is None:
             continue
         type_trades[mtype] += 1
         if win:
             type_wins[mtype] += 1
+        if cid in pos_pnl:  # outcome confirmed by /positions cashPnl (authoritative)
+            type_cashpnl_n[mtype] += 1
 
         pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open)
         if pnl is None:
@@ -419,6 +437,21 @@ def _compute_coverage_kpis(
             sharpe = round(mean_pnl * (365 ** 0.5), 3) if mean_pnl > 0 else 0.0
         type_sharpe_ratios[mtype] = sharpe
 
+    # Hold time aggregates
+    all_holds = [h for holds in type_hold_minutes.values() for h in holds]
+    avg_hold_time_minutes = round(sum(all_holds) / len(all_holds), 1) if all_holds else None
+    type_avg_hold_minutes = (
+        {mtype: round(sum(h) / len(h), 1) for mtype, h in type_hold_minutes.items() if h}
+        or None
+    )
+
+    # HR data-quality: % of win/loss calls backed by authoritative cashPnl
+    total_resolved = sum(type_trades.values())
+    total_confirmed = sum(type_cashpnl_n.values())
+    hr_cashpnl_confirmed_pct = (
+        round(total_confirmed / total_resolved, 4) if total_resolved > 0 else None
+    )
+
     return {
         "primary_universe": primary_universe,
         "active_universes": sorted(active_universes),
@@ -435,6 +468,9 @@ def _compute_coverage_kpis(
         "type_trade_counts": type_trade_counts or None,
         "type_sharpe_ratios": type_sharpe_ratios or None,
         "domain_agnostic_score": domain_agnostic,
+        "avg_hold_time_minutes": avg_hold_time_minutes,
+        "type_avg_hold_minutes": type_avg_hold_minutes,
+        "hr_cashpnl_confirmed_pct": hr_cashpnl_confirmed_pct,
     }
 
 
@@ -822,11 +858,17 @@ def _classify_archetype(profile: dict, *, is_bot: bool) -> dict[str, Any]:
     type_hrs = profile.get("type_hit_rates") or {}
     type_counts = profile.get("type_trade_counts") or {}
 
+    avg_hold = profile.get("avg_hold_time_minutes")
+
     archetype = None
     confidence = 0.5
 
     if is_bot:
         archetype, confidence = "BOT", 0.95
+    elif avg_hold is not None and avg_hold < 5:
+        # Hold time < 5 minutes = high-frequency scalper. Excluded from copy pools
+        # regardless of portfolio size (e.g. whales who scalp intraday on Polymarket).
+        archetype, confidence = "SCALPER_BOT", 0.90
     elif est_portfolio > 50_000 or max_pos_pct > 0.25:
         archetype, confidence = "WHALE", 0.80
     # EDGE_HUNTER proxy in MVP: strong HR on types where winner entries are cheap.

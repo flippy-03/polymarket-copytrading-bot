@@ -197,6 +197,7 @@ export default function WalletsPage() {
               <option value="GENERALIST">Generalist</option>
               <option value="WHALE">Whale</option>
               <option value="SCALPER_PROFILE">Scalper</option>
+              <option value="SCALPER_BOT">Scalper Bot</option>
               <option value="BOT">Bot</option>
               <option value="MOMENTUM_CHASER">Momentum Chaser</option>
             </select>
@@ -317,6 +318,7 @@ function ListView({
                 </>
               )}
               <th className="p-3">Best HR</th>
+              <th className="p-3">Avg Hold</th>
               {strategy === "SCALPER" ? (
                 <>
                   <th className="p-3">Size conv.</th>
@@ -479,6 +481,9 @@ function ListRow({
       <td className="p-3" style={{ color: "var(--green)" }}>
         {formatKpi(bestHr, "pct")}
       </td>
+      <td className="p-3">
+        <HoldTimeCell minutes={profile?.avg_hold_time_minutes as number | undefined} />
+      </td>
       {strategy === "SCALPER" ? (
         <>
           <td className="p-3">
@@ -515,6 +520,29 @@ function ListRow({
       </td>
     </tr>
   );
+}
+
+function HoldTimeCell({ minutes }: { minutes?: number }) {
+  if (minutes == null) return <span style={{ color: "var(--text-secondary)" }}>—</span>;
+  let label: string;
+  let color: string;
+  if (minutes < 1) {
+    label = "<1m";
+    color = "#c0392b"; // red — HFT scalper
+  } else if (minutes < 5) {
+    label = `${Math.round(minutes)}m`;
+    color = "#e67e22"; // orange — very short
+  } else if (minutes < 60) {
+    label = `${Math.round(minutes)}m`;
+    color = "var(--text-primary)";
+  } else if (minutes < 1440) {
+    label = `${(minutes / 60).toFixed(1)}h`;
+    color = "var(--text-primary)";
+  } else {
+    label = `${(minutes / 1440).toFixed(1)}d`;
+    color = "var(--text-secondary)";
+  }
+  return <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{label}</span>;
 }
 
 function MomentumCell({

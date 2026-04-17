@@ -10,6 +10,7 @@ export type ArchetypeId =
   | "GENERALIST"
   | "WHALE"
   | "SCALPER_PROFILE"
+  | "SCALPER_BOT"
   | "BOT"
   | "MOMENTUM_CHASER"
   | "UNKNOWN";
@@ -121,6 +122,20 @@ export const ARCHETYPES: Record<ArchetypeId, ArchetypeDef> = {
       { field: "last_30d_trades", label: "30d trades", format: "num" },
       { field: "avg_position_size_usd", label: "Avg size", format: "usd" },
       { field: "momentum_score", label: "Momentum", format: "num" },
+    ],
+  },
+  SCALPER_BOT: {
+    id: "SCALPER_BOT",
+    label: "Scalper Bot",
+    hsClass: "Warlock",
+    icon: "⚡",
+    color: "#c0392b",
+    colorDim: "rgba(192,57,43,0.15)",
+    description: "Hold time <5min. Scalper/HFT — no copia señales de predicción válidas.",
+    signature: [
+      { field: "avg_hold_time_minutes", label: "Avg hold", format: "num" },
+      { field: "hr_cashpnl_confirmed_pct", label: "HR confirmado", format: "pct" },
+      { field: "last_30d_trades", label: "30d trades", format: "num" },
     ],
   },
   BOT: {
