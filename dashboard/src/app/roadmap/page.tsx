@@ -136,7 +136,7 @@ Paper Trades          Paper Trades
           }}
         />
 
-        {snapshot?.specialist_config?.universes && (
+        {!!snapshot?.specialist_config?.universes && (
           <div style={{ marginTop: 8 }}>
             <b style={{ fontSize: 13 }}>Universos:</b>
             <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4, fontSize: 12 }}>
@@ -280,7 +280,7 @@ Paper Trades          Paper Trades
 
       {/* ── 8. Modulos ─────────────────────────────────────── */}
       <Section title="8. Modulos y servicios">
-        {snapshot?.modules && (
+        {!!snapshot?.modules && (
           <>
             <b style={{ fontSize: 13 }}>Modulos Python:</b>
             <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4, fontSize: 12 }}>
@@ -295,7 +295,7 @@ Paper Trades          Paper Trades
             </table>
           </>
         )}
-        {snapshot?.services && (
+        {!!snapshot?.services && (
           <div style={{ marginTop: 12 }}>
             <b style={{ fontSize: 13 }}>Servicios systemd:</b>
             <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4, fontSize: 12 }}>
@@ -313,7 +313,7 @@ Paper Trades          Paper Trades
       </Section>
 
       {/* ── Estado actual de BD ──────────────────────────── */}
-      {snapshot?.db_state && (
+      {!!snapshot?.db_state && (
         <Section title="9. Estado actual">
           <DbStatePanel state={snapshot.db_state} />
         </Section>
