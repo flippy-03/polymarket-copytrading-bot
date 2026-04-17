@@ -111,22 +111,26 @@ SPECIALIST_CONSECUTIVE_LOSS_LIMIT = 5
 # ── Specialist Edge strategy ─────────────────────────────
 SPECIALIST_INITIAL_CAPITAL = float(os.getenv("SPECIALIST_INITIAL_CAPITAL", "1000"))
 
-# Universes: name → {capital_pct, max_slots, market_types}
+# Universes: name → {capital_pct, max_slots, market_types, sl_pct}
+# sl_pct: stop-loss threshold from entry (None = disabled, rely on TS + exposure cap)
 SPECIALIST_UNIVERSES = {
     "crypto_above_below": {
         "capital_pct": 0.40,
         "max_slots": 3,
         "market_types": ["crypto_above", "crypto_below"],
-    },
-    "crypto_price_range": {
-        "capital_pct": 0.30,
-        "max_slots": 2,
-        "market_types": ["crypto_price_range"],
+        "sl_pct": None,        # No SL: crypto noise resolves before market close
     },
     "sports_game_winner": {
-        "capital_pct": 0.30,
+        "capital_pct": 0.40,
+        "max_slots": 3,
+        "market_types": ["sports_winner", "sports_spread"],
+        "sl_pct": -0.70,       # Live score is real info; -70% = team badly losing
+    },
+    "financial_markets": {
+        "capital_pct": 0.20,
         "max_slots": 2,
-        "market_types": ["sports_winner"],
+        "market_types": ["financial_index", "financial_commodity", "financial_stock"],
+        "sl_pct": None,        # No SL: daily resolution, same logic as crypto
     },
 }
 
@@ -151,9 +155,10 @@ SPECIALIST_MARKET_MAX_PRICE = 0.88  # Max token price
 SPECIALIST_MARKET_MAX_SPREAD = 0.06 # Max bid-ask spread
 
 # Trade sizing
-SPECIALIST_TRADE_PCT = 0.40         # 40% of universe capital per trade
-SPECIALIST_MAX_TRADE_USD = 200      # Cap per trade
+SPECIALIST_TRADE_PCT = 0.25         # 25% of universe capital per trade
+SPECIALIST_MAX_TRADE_USD = 200      # Safety cap per trade
 SPECIALIST_MIN_TRADE_USD = 10       # Floor per trade
+SPECIALIST_MAX_EXPOSURE_PCT = 0.50  # Max total open exposure as % of portfolio
 
 # Trailing stop (spec §10)
 TS_ACTIVATION = 0.08                # Activate trailing after +8% gain

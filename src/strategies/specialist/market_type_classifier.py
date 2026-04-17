@@ -12,6 +12,20 @@ from typing import Optional
 # ── Pattern → type mapping (order matters — first match wins) ──────────────
 
 _PATTERNS: list[tuple[re.Pattern, str]] = [
+    # ── Financial markets (must run before crypto — gold/silver match crypto_above otherwise)
+    (re.compile(
+        r"\b(s&p\s*500?|nasdaq|dow\s*jones|ftse|dax|nikkei|hang\s*seng|russell\s*2000|vix)\b",
+        re.I,
+    ), "financial_index"),
+    (re.compile(
+        r"\b(gold|silver|crude\s*oil|brent|wti|natural\s*gas|copper|platinum)\b.{0,30}\$[\d,]+",
+        re.I,
+    ), "financial_commodity"),
+    (re.compile(
+        r"\b(stock|share|equity)\b.{0,30}\b(close|closing|above|below)\b.{0,20}\$[\d,]+",
+        re.I,
+    ), "financial_stock"),
+
     # ── Crypto directional: above / below / hit-price ────────────────────────
     (re.compile(
         r"\b(above|over|exceed|higher than|break above)\b.{0,40}\$[\d,k]+",

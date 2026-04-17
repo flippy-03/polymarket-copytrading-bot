@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from src.strategies.common import clob_exec, db
+from src.strategies.common import clob_exec, config as C, db
 from src.strategies.common.gamma_client import GammaClient
 from src.utils.logger import logger
 
@@ -41,10 +41,8 @@ class PositionManager:
     def __init__(self, gamma: GammaClient, run_id: str):
         self._gamma = gamma
         self._run_id = run_id
-        from src.strategies.common import config as C
         self._ts_activation = C.TS_ACTIVATION
         self._ts_trail = C.TS_TRAIL_PCT
-        self._ts_hard_stop = C.TS_HARD_STOP
 
     def check_all_open(self) -> list[ClosureEvent]:
         """
@@ -116,24 +114,44 @@ class PositionManager:
 
         pct_change = (current_price - entry_price) / entry_price
 
+        # ── Universe-specific stop-loss ───────────────────────
+        # Only applied when configured (e.g. sports: -70%, live score is signal).
+        universe_cfg = C.SPECIALIST_UNIVERSES.get(universe, {})
+        sl_pct = universe_cfg.get("sl_pct")
+        if sl_pct is not None and pct_change <= sl_pct:
+            clob_exec.close_paper_trade(trade_id, "STOP_LOSS")
+            logger.info(
+                f"  SL triggered {trade_id[:8]}… universe={universe} "
+                f"entry={entry_price:.3f} current={current_price:.3f} "
+                f"pct={pct_change:.1%} threshold={sl_pct:.0%}"
+            )
+            return ClosureEvent(trade_id, "STOP_LOSS", universe, cid)
+
         trailing_active = bool(metadata.get("trailing_active", False))
         high_water = float(metadata.get("high_water_mark") or current_price)
+        low_water = float(metadata.get("low_water_mark") or current_price)
 
-        # Update high-water mark if price moved up
+        # Build metadata patch — always track both watermarks for backtest analysis
+        patch: dict = {}
         if current_price > high_water:
             high_water = current_price
-            db.update_copy_trade_metadata(trade_id, {"high_water_mark": high_water})
+            patch["high_water_mark"] = high_water
+        if current_price < low_water:
+            low_water = current_price
+            patch["low_water_mark"] = low_water
 
         # Activate trailing after +8% gain
         if not trailing_active and pct_change >= self._ts_activation:
-            db.update_copy_trade_metadata(
-                trade_id, {"trailing_active": True, "high_water_mark": high_water}
-            )
+            patch["trailing_active"] = True
+            patch["high_water_mark"] = high_water
+            trailing_active = True
             logger.info(
                 f"  trailing ACTIVATED {trade_id[:8]}… "
                 f"entry={entry_price:.3f} current={current_price:.3f}"
             )
-            trailing_active = True
+
+        if patch:
+            db.update_copy_trade_metadata(trade_id, patch)
 
         # Trailing stop check
         if trailing_active:

@@ -397,6 +397,45 @@ _OPEN_TRADE_COLS = (
     "entry_price,position_usd,shares,metadata"
 )
 
+def get_current_specialist_exposure(run_id: str) -> float:
+    """Sum of position_usd for all open non-shadow SPECIALIST trades."""
+    client = _db.get_client()
+    try:
+        rows = (
+            client.table("copy_trades")
+            .select("position_usd")
+            .eq("strategy", "SPECIALIST")
+            .eq("run_id", run_id)
+            .eq("status", "OPEN")
+            .eq("is_shadow", False)
+            .execute()
+        ).data or []
+        return sum(float(r["position_usd"] or 0) for r in rows)
+    except Exception as e:
+        logger.warning(f"get_current_specialist_exposure: {e}")
+        return 0.0
+
+
+def get_today_opened_condition_ids(run_id: str, strategy: str) -> set[str]:
+    """condition_ids for all real trades opened today — blocks same-market re-entries."""
+    client = _db.get_client()
+    try:
+        today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        rows = (
+            client.table("copy_trades")
+            .select("market_polymarket_id")
+            .eq("strategy", strategy)
+            .eq("run_id", run_id)
+            .eq("is_shadow", False)
+            .gte("opened_at", today_utc)
+            .execute()
+        ).data or []
+        return {r["market_polymarket_id"] for r in rows if r.get("market_polymarket_id")}
+    except Exception as e:
+        logger.warning(f"get_today_opened_condition_ids: {e}")
+        return set()
+
+
 def list_open_trades(
     strategy: Optional[str] = None,
     *,

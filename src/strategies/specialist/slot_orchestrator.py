@@ -135,4 +135,8 @@ class SlotOrchestrator:
             if cid:
                 cids.add(cid)
 
+        # Also block markets already traded today (open or closed) — prevents re-entries
+        today_cids = db.get_today_opened_condition_ids(self._run_id, STRATEGY)
+        cids.update(today_cids)
+
         return dict(counts), cids

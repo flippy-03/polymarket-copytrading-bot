@@ -13,7 +13,7 @@ import json
 from typing import Optional
 
 from src.strategies.common import config as C
-from src.strategies.common import clob_exec
+from src.strategies.common import clob_exec, db
 from src.strategies.specialist.signal_generator import Signal
 from src.strategies.specialist.universe_config import universe_capital
 from src.utils.logger import logger
@@ -64,6 +64,20 @@ def execute_signal(
     size_usd = min(size_usd, C.SPECIALIST_MAX_TRADE_USD)
     size_usd = max(size_usd, C.SPECIALIST_MIN_TRADE_USD)
 
+    # Dynamic exposure cap: total open positions ≤ 50% of portfolio
+    max_exposure = total_capital * C.SPECIALIST_MAX_EXPOSURE_PCT
+    current_exposure = db.get_current_specialist_exposure(run_id)
+    available = max_exposure - current_exposure
+    if available < C.SPECIALIST_MIN_TRADE_USD:
+        logger.info(
+            f"  executor: exposure cap reached "
+            f"(open=${current_exposure:.0f} / max=${max_exposure:.0f}) — skipping"
+        )
+        return None
+    if size_usd > available:
+        size_usd = round(available, 2)
+        logger.info(f"  executor: size trimmed to ${size_usd:.2f} (exposure headroom)")
+
     # Spread + CLOB price range check.
     # get_spread() gives us both ask and bid with two CLOB calls.  We reuse
     # those values to (a) block wide spreads and (b) guard against stale Gamma
@@ -113,6 +127,7 @@ def execute_signal(
         "avg_hit_rate": signal.avg_hit_rate,
         "trailing_active": False,
         "high_water_mark": None,
+        "low_water_mark": None,
     }
 
     result = clob_exec.open_paper_trade(
