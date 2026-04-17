@@ -16,7 +16,7 @@ VERSION="${1:-v2.0}"
 CAPITAL="${2:-1000}"
 VPS_IP="187.124.45.248"
 VPS_USER="root"
-PROJECT_DIR="/opt/polymarket-copytrading-bot"
+PROJECT_DIR="/root/polymarket-copytrading-bot"
 NOTES="Reset estructural ${VERSION}: nuevo sistema de gestión de riesgo"
 
 echo "=============================================="
@@ -39,11 +39,10 @@ python scripts/new_run.py \
     --close-positions \
     --notes "${NOTES}"
 
-# ── 3. Actualizar código en VPS ───────────────────────────
+# ── 3. Actualizar código en VPS (deploy por archive — no hay git en VPS) ───
 echo ""
 echo "[3/4] Actualizando código en VPS..."
-ssh "${VPS_USER}@${VPS_IP}" \
-    "cd ${PROJECT_DIR} && git pull origin main && echo '  OK: código actualizado'"
+git archive HEAD | gzip | ssh "${VPS_USER}@${VPS_IP}" "tar xzf - -C ${PROJECT_DIR}/" && echo "  OK: código actualizado"
 
 # ── 4. Reiniciar servicios ────────────────────────────────
 echo ""
