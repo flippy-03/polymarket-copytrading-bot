@@ -124,17 +124,14 @@ export function WalletProfileCard({ row, onClick }: Props) {
       className="text-left w-full"
       style={{
         position: "relative",
-        borderRadius: 14,
-        padding: 1,
-        // Subtle background gradient: archetype color tint at top fading to card bg
-        background: `linear-gradient(180deg, ${archetype.color}33 0%, ${archetype.color}08 55%, transparent 100%)`,
-        boxShadow: rarityStyle.glow, // glow persists to signal rarity tier
+        borderRadius: 12,
+        background: "var(--bg-card)",
         border: "1px solid var(--border)",
-        transition: "transform 120ms ease, box-shadow 120ms ease",
+        transition: "transform 120ms ease, border-color 120ms ease",
         overflow: "visible", // let bookmark poke out
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-2px) scale(1.01)";
+        e.currentTarget.style.transform = "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = "";
@@ -146,15 +143,11 @@ export function WalletProfileCard({ row, onClick }: Props) {
       <div
         style={{
           position: "relative",
-          borderRadius: 13,
-          // Diagonal felt gradient — gives the card-game depth without being loud
-          background: `linear-gradient(135deg, var(--bg-card) 0%, ${archetype.colorDim} 100%)`,
           padding: 14,
           display: "flex",
           flexDirection: "column",
           gap: 10,
           minHeight: 280,
-          overflow: "hidden",
         }}
       >
         {/* ── Header banner ───────────────────────────────── */}
@@ -164,25 +157,14 @@ export function WalletProfileCard({ row, onClick }: Props) {
             alignItems: "center",
             justifyContent: "space-between",
             padding: "8px 10px",
+            // Right side padded extra so the stars don't sit under the bookmark
+            paddingRight: 22,
             borderRadius: 8,
             background: archetype.colorDim,
             borderBottom: `1px solid ${archetype.color}44`,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            {/* Stars moved to the LEFT so the bookmark doesn't overlap them */}
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: rarityStyle.color,
-                letterSpacing: 1,
-                flexShrink: 0,
-              }}
-              title={rarityStyle.label}
-            >
-              {rarityStyle.stars}
-            </span>
             <span style={{ fontSize: 18, flexShrink: 0 }}>{archetype.icon}</span>
             <div style={{ minWidth: 0 }}>
               <div
@@ -202,6 +184,19 @@ export function WalletProfileCard({ row, onClick }: Props) {
               </div>
             </div>
           </div>
+          {/* Stars on the RIGHT — extra padding on the banner keeps clear of the bookmark */}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: rarityStyle.color,
+              letterSpacing: 1,
+              flexShrink: 0,
+            }}
+            title={rarityStyle.label}
+          >
+            {rarityStyle.stars}
+          </span>
         </div>
 
         {/* ── Wallet + badges ─────────────────────────────── */}
