@@ -127,6 +127,7 @@ def execute_signal(
         "specialists_against": signal.specialists_against,
         "ratio": signal.ratio,
         "avg_hit_rate": signal.avg_hit_rate,
+        "event_slug": signal.event_slug,
         "trailing_active": False,
         "high_water_mark": None,
         "low_water_mark": None,

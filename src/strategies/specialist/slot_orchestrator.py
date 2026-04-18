@@ -52,10 +52,10 @@ class SlotOrchestrator:
         closures: list[ClosureEvent] = self._position_manager.check_all_open()
         summary["closures"] = [c.reason for c in closures]
 
-        # Step 2 — Count open trades per universe + collect open condition_ids
-        # Both derived in a single DB round-trip via _snapshot_open_trades().
-        open_by_universe, open_cids = self._snapshot_open_trades()
-        # open_cids is updated within the loop so within-tick duplicates are also blocked.
+        # Step 2 — Count open trades per universe + collect open condition_ids / event_slugs.
+        # All derived in a single DB round-trip via _snapshot_open_trades().
+        open_by_universe, open_cids, open_event_slugs = self._snapshot_open_trades()
+        # Both sets are updated within the loop so within-tick duplicates are also blocked.
         logger.info(
             "  orchestrator: open per universe: "
             + (", ".join(f"{u}={n}" for u, n in open_by_universe.items()) or "none")
@@ -87,7 +87,7 @@ class SlotOrchestrator:
                 if free_slots <= 0:
                     break
                 # Skip if this market already has an open position (same condition_id).
-                # This prevents duplicates when the router returns the same market twice
+                # Prevents duplicates when the router returns the same market twice
                 # (e.g., matching multiple market types) or across tick boundary.
                 if signal.condition_id in open_cids:
                     logger.debug(
@@ -95,12 +95,25 @@ class SlotOrchestrator:
                     )
                     summary["skipped"].append(f"dup/{signal.condition_id[:8]}")
                     continue
+                # Skip if another market from the same event is already open (e.g. same
+                # NBA game's money line, O/U and spread). One position per event to
+                # diversify risk. Re-entering after close is allowed (event_slug leaves
+                # the open set once the trade closes).
+                if signal.event_slug and signal.event_slug in open_event_slugs:
+                    logger.info(
+                        f"  orchestrator: skip {signal.condition_id[:8]}… "
+                        f"event '{signal.event_slug}' already has an open position"
+                    )
+                    summary["skipped"].append(f"dup_event/{signal.event_slug[:20]}")
+                    continue
                 try:
                     result = execute_signal(signal, self._run_id, total_capital)
                     if result and result.get("real"):
                         summary["opened"].append(f"{universe}/{signal.direction}")
                         free_slots -= 1
-                        open_cids.add(signal.condition_id)  # prevent within-tick duplicate
+                        open_cids.add(signal.condition_id)
+                        if signal.event_slug:
+                            open_event_slugs.add(signal.event_slug)
                     else:
                         summary["skipped"].append(f"{universe}/{signal.direction}")
                 except Exception as e:
@@ -108,12 +121,13 @@ class SlotOrchestrator:
 
         return summary
 
-    def _snapshot_open_trades(self) -> tuple[dict[str, int], set[str]]:
-        """Single DB round-trip: return (open_by_universe, open_condition_ids).
+    def _snapshot_open_trades(self) -> tuple[dict[str, int], set[str], set[str]]:
+        """Single DB round-trip: return (open_by_universe, open_condition_ids, open_event_slugs).
 
         open_by_universe: {universe → count} used for slot accounting.
-        open_condition_ids: set of condition_ids with an open real trade, used
-        for market-level deduplication to prevent double-entering the same market.
+        open_condition_ids: condition_ids with an open real trade — market-level dedup.
+        open_event_slugs: event_slugs with an open real trade — event-level dedup
+        (e.g. prevents opening the money line, O/U and spread of the same NBA game).
         """
         try:
             open_trades = db.list_open_trades(
@@ -122,10 +136,11 @@ class SlotOrchestrator:
                 is_shadow=False,
             )
         except Exception:
-            return {}, set()
+            return {}, set(), set()
 
         counts: Counter = Counter()
         cids: set[str] = set()
+        event_slugs: set[str] = set()
         for trade in open_trades:
             metadata = trade.get("metadata") or {}
             universe = metadata.get("universe")
@@ -134,9 +149,12 @@ class SlotOrchestrator:
             cid = trade.get("market_polymarket_id")
             if cid:
                 cids.add(cid)
+            evt = metadata.get("event_slug")
+            if evt:
+                event_slugs.add(evt)
 
         # Also block markets already traded today (open or closed) — prevents re-entries
         today_cids = db.get_today_opened_condition_ids(self._run_id, STRATEGY)
         cids.update(today_cids)
 
-        return dict(counts), cids
+        return dict(counts), cids, event_slugs

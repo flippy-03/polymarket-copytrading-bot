@@ -47,6 +47,7 @@ class Signal:
     expected_roi: float
     compound_roi: float    # expected_roi × time_bonus; used for ranking only
     condition_id: str
+    event_slug: Optional[str] = None   # Gamma `eventSlug` — groups related markets (e.g. same game's money line, O/U, spread)
 
     @property
     def is_actionable(self) -> bool:
@@ -189,6 +190,8 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
     time_bonus = min(1.0, 6.0 / hours) ** 0.25
     compound_roi = expected_roi * time_bonus
 
+    event_slug = analysis.market.get("eventSlug") or analysis.market.get("event_slug")
+
     return Signal(
         market=analysis.market,
         universe=analysis.universe,
@@ -207,6 +210,7 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
         expected_roi=round(expected_roi, 4),
         compound_roi=round(compound_roi, 4),
         condition_id=analysis.condition_id,
+        event_slug=event_slug,
     )
 
 
