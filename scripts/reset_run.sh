@@ -32,7 +32,7 @@ ssh "${VPS_USER}@${VPS_IP}" \
 # ── 2. Crear nuevas runs (BD Supabase, acceso local) ──────
 echo ""
 echo "[2/4] Creando nuevas runs (cerrando posiciones abiertas)..."
-python scripts/new_run.py \
+python -m scripts.new_run \
     --strategy ALL \
     --version "${VERSION}" \
     --capital "${CAPITAL}" \
