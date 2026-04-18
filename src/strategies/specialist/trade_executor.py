@@ -118,6 +118,14 @@ def execute_signal(
         f"eROI={signal.expected_roi:.1%}"
     )
 
+    # Market close time — prefer sport gameStartTime (when trading stops),
+    # fall back to endDate for crypto/financial (daily resolution).
+    closes_at = (
+        market.get("gameStartTime")
+        or market.get("endDate")
+        or market.get("endDateIso")
+    )
+
     metadata = {
         "universe": signal.universe,
         "market_type": signal.market_type,
@@ -127,7 +135,9 @@ def execute_signal(
         "specialists_against": signal.specialists_against,
         "ratio": signal.ratio,
         "avg_hit_rate": signal.avg_hit_rate,
+        "confidence": signal.confidence,
         "event_slug": signal.event_slug,
+        "closes_at": closes_at,
         "trailing_active": False,
         "high_water_mark": None,
         "low_water_mark": None,

@@ -13,12 +13,13 @@ export const dynamic = "force-dynamic";
 // Recent Trades table is capped at 50. Anything above this is waste.
 const MAX_LIMIT = 200;
 
-// Columns actually consumed by the dashboard (page.tsx + analytics).
-// select("*") previously pulled shares, metadata, is_shadow, etc. unused client-side.
+// Columns consumed by the dashboard (page.tsx + analytics).
+// metadata included: ~100-200 bytes/row for specialists_count, avg_hit_rate,
+// signal_quality, closes_at, event_slug used by Recent Trades columns.
 const TRADE_COLUMNS =
   "id,strategy,run_id,source_wallet,market_polymarket_id,market_question," +
   "market_category,direction,outcome_token_id,entry_price,exit_price," +
-  "position_usd,pnl_usd,pnl_pct,status,close_reason,opened_at,closed_at,is_shadow";
+  "position_usd,pnl_usd,pnl_pct,status,close_reason,opened_at,closed_at,is_shadow,metadata";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

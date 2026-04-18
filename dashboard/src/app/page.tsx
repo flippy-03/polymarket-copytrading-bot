@@ -16,6 +16,8 @@ import {
 import KpiCard from "@/components/KpiCard";
 import TimeFilterBar from "@/components/TimeFilter";
 import {
+  computeEV,
+  formatClosesAt,
   formatPct,
   formatPnl,
   getDateFromFilter,
@@ -40,13 +42,17 @@ export default function DashboardPage() {
     [ctx],
   );
   const { data: portfolio, refresh: refreshPortfolio } =
-    useAutoRefresh<PortfolioState>(portfolioFetcher);
+    useAutoRefresh<PortfolioState>(portfolioFetcher, 60000, `portfolio:${ctx}`);
 
   const positionsFetcher = useCallback(
     () => fetch(`/api/positions?${ctx}`).then((r) => r.json()),
     [ctx],
   );
-  const { data: positions } = useAutoRefresh<Record<string, unknown>[]>(positionsFetcher);
+  const { data: positions } = useAutoRefresh<Record<string, unknown>[]>(
+    positionsFetcher,
+    60000,
+    `positions:${ctx}`,
+  );
 
   const tradesFetcher = useCallback(() => {
     const since = getDateFromFilter(timeFilter);
@@ -56,7 +62,11 @@ export default function DashboardPage() {
     if (since) params.set("since", since);
     return fetch(`/api/trades?${params}`).then((r) => r.json());
   }, [ctx, timeFilter]);
-  const { data: trades } = useAutoRefresh<Record<string, unknown>[]>(tradesFetcher);
+  const { data: trades } = useAutoRefresh<Record<string, unknown>[]>(
+    tradesFetcher,
+    60000,
+    `trades:${ctx}:${timeFilter}`,
+  );
 
   const allTradesFetcher = useCallback(
     // Equity curve only uses pnl_usd + close/open timestamps. limit=100 keeps
@@ -68,6 +78,7 @@ export default function DashboardPage() {
   const { data: rawAllTrades } = useAutoRefresh<Record<string, unknown>[]>(
     allTradesFetcher,
     300000,
+    `equity:${ctx}`,
   );
 
   const equityCurve = (() => {
@@ -356,11 +367,15 @@ export default function DashboardPage() {
                 {shadowMode === "BOTH" && (
                   <th className="text-center px-3 py-2 font-medium">Type</th>
                 )}
+                <th className="text-right px-3 py-2 font-medium">Size</th>
                 <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
+                <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                <th className="text-right px-3 py-2 font-medium" title="Average historical hit rate of signaling specialists">Avg HR</th>
+                <th className="text-right px-3 py-2 font-medium" title="EV = avg hit rate − entry price · positive = odds on your side">EV</th>
                 <th className="text-right px-3 py-2 font-medium">SL / TP</th>
                 <th className="text-right px-3 py-2 font-medium">Unrealized</th>
-                <th className="text-right px-3 py-2 font-medium">Size</th>
+                <th className="text-right px-3 py-2 font-medium">Closes</th>
                 <th className="text-right px-5 py-2 font-medium">Held</th>
               </tr>
             </thead>
@@ -376,6 +391,12 @@ export default function DashboardPage() {
                 const tp = entry > 0 ? Math.min(entry * 1.20, 0.999) : null;
                 const trailingActive = meta.trailing_active === true;
                 const hwm = meta.high_water_mark != null ? Number(meta.high_water_mark) : null;
+                const specsFor = meta.specialists_count != null ? Number(meta.specialists_count) : null;
+                const specsAgainst = meta.specialists_against != null ? Number(meta.specialists_against) : null;
+                const avgHr = meta.avg_hit_rate != null ? Number(meta.avg_hit_rate) : null;
+                const ratio = meta.ratio != null ? Number(meta.ratio) : null;
+                const ev = computeEV(avgHr, entry);
+                const closesAt = meta.closes_at as string | undefined;
                 return (
                   <tr key={String(p.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
                     <td className="px-5 py-2.5 max-w-56 truncate" title={String(p.market_question ?? "")}>
@@ -406,6 +427,9 @@ export default function DashboardPage() {
                         </span>
                       </td>
                     )}
+                    <td className="text-right px-3 py-2.5 font-medium">
+                      ${Number(p.position_usd ?? 0).toFixed(2)}
+                    </td>
                     <td className="text-center px-3 py-2.5">
                       {quality ? (
                         <span title={universe}>
@@ -421,9 +445,9 @@ export default function DashboardPage() {
                           >
                             {quality}
                           </span>
-                          {universe && (
+                          {ratio != null && (
                             <span className="ml-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
-                              {universe.replace(/_/g, " ")}
+                              {ratio.toFixed(1)}×
                             </span>
                           )}
                         </span>
@@ -433,6 +457,27 @@ export default function DashboardPage() {
                     </td>
                     <td className="text-right px-3 py-2.5">
                       ${entry.toFixed(3)}
+                    </td>
+                    <td className="text-center px-3 py-2.5 text-xs">
+                      {specsFor != null ? (
+                        <span>
+                          <span style={{ color: "var(--green)" }}>{specsFor}</span>
+                          <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
+                          <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-3 py-2.5 text-xs">
+                      {avgHr != null ? `${(avgHr * 100).toFixed(0)}%` : <span style={{ color: "var(--text-secondary)" }}>—</span>}
+                    </td>
+                    <td
+                      className="text-right px-3 py-2.5 font-medium text-xs"
+                      style={{ color: ev != null ? pnlColor(ev) : "var(--text-secondary)" }}
+                      title={ev != null ? `Expected value per $1 staked: ${ev >= 0 ? "+" : ""}$${ev.toFixed(3)}` : undefined}
+                    >
+                      {ev != null ? `${ev >= 0 ? "+" : ""}${(ev * 100).toFixed(1)}%` : "—"}
                     </td>
                     <td className="text-right px-3 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
                       {isShadow && sl != null && tp != null ? (
@@ -459,8 +504,8 @@ export default function DashboardPage() {
                         ? formatPnl(Number(p.unrealized_pnl ?? 0))
                         : <span style={{ color: "var(--text-secondary)" }}>—</span>}
                     </td>
-                    <td className="text-right px-3 py-2.5">
-                      ${Number(p.position_usd ?? 0).toFixed(2)}
+                    <td className="text-right px-3 py-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
+                      {formatClosesAt(closesAt)}
                     </td>
                     <td className="text-right px-5 py-2.5" style={{ color: "var(--text-secondary)" }}>
                       {timeAgo(p.opened_at as string)}
@@ -470,7 +515,7 @@ export default function DashboardPage() {
               })}
               {(positions ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={shadowMode === "BOTH" ? 9 : 8} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td colSpan={shadowMode === "BOTH" ? 13 : 12} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
                     No open positions
                   </td>
                 </tr>
@@ -509,8 +554,13 @@ export default function DashboardPage() {
                 {shadowMode === "BOTH" && (
                   <th className="text-center px-3 py-2 font-medium">Type</th>
                 )}
+                <th className="text-right px-3 py-2 font-medium">Size</th>
+                <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
                 <th className="text-right px-3 py-2 font-medium">Exit</th>
+                <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                <th className="text-right px-3 py-2 font-medium" title="Average historical hit rate of signaling specialists">Avg HR</th>
+                <th className="text-right px-3 py-2 font-medium" title="EV = avg hit rate − entry price at open">EV</th>
                 <th className="text-right px-3 py-2 font-medium">P&L</th>
                 <th className="text-right px-3 py-2 font-medium">Return</th>
                 <th className="text-right px-5 py-2 font-medium">Reason</th>
@@ -520,6 +570,14 @@ export default function DashboardPage() {
               {(trades ?? []).map((t) => {
                 const stamp = (t.closed_at as string) ?? (t.opened_at as string) ?? "";
                 const isShadow = t.is_shadow === true;
+                const meta = (t.metadata ?? {}) as Record<string, unknown>;
+                const quality = String(meta.signal_quality ?? "");
+                const specsFor = meta.specialists_count != null ? Number(meta.specialists_count) : null;
+                const specsAgainst = meta.specialists_against != null ? Number(meta.specialists_against) : null;
+                const avgHr = meta.avg_hit_rate != null ? Number(meta.avg_hit_rate) : null;
+                const ratio = meta.ratio != null ? Number(meta.ratio) : null;
+                const entryPx = Number(t.entry_price ?? 0);
+                const ev = computeEV(avgHr, entryPx);
                 return (
                   <tr key={String(t.id)} className="border-t" style={{ borderColor: "var(--border)" }}>
                     <td
@@ -557,11 +615,60 @@ export default function DashboardPage() {
                         </span>
                       </td>
                     )}
+                    <td className="text-right px-3 py-2.5 font-medium">
+                      ${Number(t.position_usd ?? 0).toFixed(2)}
+                    </td>
+                    <td className="text-center px-3 py-2.5">
+                      {quality ? (
+                        <span>
+                          <span
+                            className="px-1.5 py-0.5 rounded text-xs font-bold"
+                            style={
+                              quality === "CLEAN"
+                                ? { background: "var(--green-dim)", color: "var(--green)" }
+                                : quality === "CONTESTED"
+                                ? { background: "#ffd93d22", color: "var(--yellow)" }
+                                : { background: "var(--bg-secondary)", color: "var(--text-secondary)" }
+                            }
+                          >
+                            {quality}
+                          </span>
+                          {ratio != null && (
+                            <span className="ml-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+                              {ratio.toFixed(1)}×
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>—</span>
+                      )}
+                    </td>
                     <td className="text-right px-3 py-2.5">
-                      ${Number(t.entry_price ?? 0).toFixed(3)}
+                      ${entryPx.toFixed(3)}
                     </td>
                     <td className="text-right px-3 py-2.5">
                       {t.exit_price != null ? `$${Number(t.exit_price).toFixed(3)}` : "—"}
+                    </td>
+                    <td className="text-center px-3 py-2.5 text-xs">
+                      {specsFor != null ? (
+                        <span>
+                          <span style={{ color: "var(--green)" }}>{specsFor}</span>
+                          <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
+                          <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-3 py-2.5 text-xs">
+                      {avgHr != null ? `${(avgHr * 100).toFixed(0)}%` : <span style={{ color: "var(--text-secondary)" }}>—</span>}
+                    </td>
+                    <td
+                      className="text-right px-3 py-2.5 font-medium text-xs"
+                      style={{ color: ev != null ? pnlColor(ev) : "var(--text-secondary)" }}
+                      title={ev != null ? `EV at open per $1 staked: ${ev >= 0 ? "+" : ""}$${ev.toFixed(3)}` : undefined}
+                    >
+                      {ev != null ? `${ev >= 0 ? "+" : ""}${(ev * 100).toFixed(1)}%` : "—"}
                     </td>
                     <td
                       className="text-right px-3 py-2.5 font-medium"
@@ -586,7 +693,7 @@ export default function DashboardPage() {
               })}
               {(trades ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={shadowMode === "BOTH" ? 9 : 8} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td colSpan={shadowMode === "BOTH" ? 14 : 13} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
                     No trades in this period
                   </td>
                 </tr>
