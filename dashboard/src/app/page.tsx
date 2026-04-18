@@ -348,16 +348,7 @@ export default function DashboardPage() {
           className="px-5 py-3 border-b flex items-center justify-between"
           style={{ borderColor: "var(--border)" }}
         >
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium">Open Positions</h3>
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded"
-              style={{ background: "#a855f722", color: "#c084fc" }}
-              title="New columns: Specs, Avg HR, EV, Closes"
-            >
-              v2.1
-            </span>
-          </div>
+          <h3 className="text-sm font-medium">Open Positions</h3>
           <span
             className="text-xs px-2 py-0.5 rounded-full"
             style={{ background: "var(--blue)", color: "#fff" }}

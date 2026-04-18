@@ -25,13 +25,13 @@ echo "=============================================="
 
 # ── 1. Parar servicios en VPS ─────────────────────────────
 echo ""
-echo "[1/4] Parando servicios en VPS (${VPS_IP})..."
+echo "[1/5] Parando servicios en VPS (${VPS_IP})..."
 ssh "${VPS_USER}@${VPS_IP}" \
     "systemctl stop polymarket-specialist polymarket-scalper 2>/dev/null || true && echo '  OK: servicios parados'"
 
 # ── 2. Crear nuevas runs (BD Supabase, acceso local) ──────
 echo ""
-echo "[2/4] Creando nuevas runs (cerrando posiciones abiertas)..."
+echo "[2/5] Creando nuevas runs (cerrando posiciones abiertas)..."
 python -m scripts.new_run \
     --strategy ALL \
     --version "${VERSION}" \
@@ -41,14 +41,22 @@ python -m scripts.new_run \
 
 # ── 3. Actualizar código en VPS (deploy por archive — no hay git en VPS) ───
 echo ""
-echo "[3/4] Actualizando código en VPS..."
+echo "[3/5] Actualizando código en VPS..."
 git archive HEAD | gzip | ssh "${VPS_USER}@${VPS_IP}" "tar xzf - -C ${PROJECT_DIR}/" && echo "  OK: código actualizado"
 
-# ── 4. Reiniciar servicios ────────────────────────────────
+# ── 4. Reiniciar servicios Python (daemons) ────────────────
 echo ""
-echo "[4/4] Reiniciando servicios..."
+echo "[4/5] Reiniciando daemons (specialist + scalper)..."
 ssh "${VPS_USER}@${VPS_IP}" \
     "systemctl restart polymarket-specialist polymarket-scalper && echo '  OK: servicios reiniciados'"
+
+# ── 5. Rebuild + restart dashboard (Next.js + PM2) ─────────
+# El dashboard corre en PM2 y sirve el build prerenderizado de .next/. Un
+# `git archive` copia src/ pero Next sigue sirviendo el build viejo hasta
+# que rebuildemos y reiniciemos PM2.
+echo ""
+echo "[5/5] Rebuild + restart dashboard (PM2)..."
+./scripts/deploy_dashboard.sh --no-sync
 
 # ── Verificación ──────────────────────────────────────────
 echo ""
