@@ -79,13 +79,18 @@ def _reset_strategy(
     )
     logger.info(f"[{strategy}] created run {new_run_id[:8]}… (version={version})")
 
-    if carryover:
-        if strategy == "SPECIALIST":
-            n = db.carry_over_spec_ranking(old_run_id, new_run_id)
-            logger.info(f"[{strategy}] migrated {n} spec_ranking row(s)")
-        elif strategy == "SCALPER":
-            n = db.carry_over_scalper_pool(old_run_id, new_run_id)
-            logger.info(f"[{strategy}] carried over {n} scalper_pool row(s)")
+    if strategy == "SPECIALIST" and carryover:
+        n = db.carry_over_spec_ranking(old_run_id, new_run_id)
+        logger.info(f"[{strategy}] migrated {n} spec_ranking row(s)")
+    elif strategy == "SCALPER":
+        # SCALPER V2 always re-bootstraps from wallet_profiles — carry-over is
+        # broken by design (only preserved 5 legacy columns, lost V2 fields like
+        # approved_market_types, composite_score, allocation_pct).
+        from src.strategies.scalper.pool_selector import ScalperPoolSelector
+        selector = ScalperPoolSelector(run_id=new_run_id)
+        candidates = selector.select()
+        selector.persist_selection(candidates)
+        logger.info(f"[{strategy}] bootstrapped {len(candidates)} titulares via pool_selector")
 
     max_pos = 8  # sensible default for both strategies
     db.ensure_portfolio_row(
@@ -111,6 +116,9 @@ def _build_config_snapshot(strategy: str) -> dict:
             "SPECIALIST_MAX_TRADE_USD": C.SPECIALIST_MAX_TRADE_USD,
             "SPECIALIST_MIN_TRADE_USD": C.SPECIALIST_MIN_TRADE_USD,
             "SPECIALIST_MAX_EXPOSURE_PCT": C.SPECIALIST_MAX_EXPOSURE_PCT,
+            "SPECIALIST_CONTESTED_SIZE_MULT": C.SPECIALIST_CONTESTED_SIZE_MULT,
+            "SIGNAL_CLEAN_RATIO": C.SIGNAL_CLEAN_RATIO,
+            "SIGNAL_CONTESTED_RATIO": C.SIGNAL_CONTESTED_RATIO,
             "SPECIALIST_UNIVERSES": {
                 k: {kk: vv for kk, vv in v.items() if kk != "market_types"}
                 for k, v in C.SPECIALIST_UNIVERSES.items()

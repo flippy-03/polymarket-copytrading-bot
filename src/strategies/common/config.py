@@ -124,7 +124,7 @@ SPECIALIST_UNIVERSES = {
         "capital_pct": 0.40,
         "max_slots": 3,
         "market_types": ["sports_winner", "sports_spread"],
-        "sl_pct": -0.70,       # Live score is real info; -70% = team badly losing
+        "sl_pct": -0.50,       # Tightened from -0.70 after 3 SL hits in v2.0 run lost $215
     },
     "financial_markets": {
         "capital_pct": 0.20,
@@ -146,6 +146,7 @@ SIGNAL_CLEAN_RATIO = 2.5            # specialists_for / specialists_against >= 2
 SIGNAL_CONTESTED_RATIO = 1.5        # ratio >= 1.5 but < 2.5
 SIGNAL_MIN_SPECIALISTS = 2          # At least 2 known specialists on winning side
 SIGNAL_CONFLICT_PENALTY = 0.30      # Penalty when both sides have specialists
+SPECIALIST_CONTESTED_SIZE_MULT = 0.30  # CONTESTED signals sized at 30% of CLEAN (v2.0: HR 16.7% vs 75% CLEAN)
 
 # Market filtering for routing
 SPECIALIST_MARKET_MIN_VOLUME_24H = 50_000  # $50K min 24h volume

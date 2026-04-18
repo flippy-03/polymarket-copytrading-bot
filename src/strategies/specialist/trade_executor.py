@@ -14,7 +14,7 @@ from typing import Optional
 
 from src.strategies.common import config as C
 from src.strategies.common import clob_exec, db
-from src.strategies.specialist.signal_generator import Signal
+from src.strategies.specialist.signal_generator import Signal, SignalQuality
 from src.strategies.specialist.universe_config import universe_capital
 from src.utils.logger import logger
 
@@ -61,6 +61,8 @@ def execute_signal(
     # Size calculation
     uni_cap = universe_capital(signal.universe, total_capital)
     size_usd = uni_cap * C.SPECIALIST_TRADE_PCT
+    if signal.quality == SignalQuality.CONTESTED:
+        size_usd *= C.SPECIALIST_CONTESTED_SIZE_MULT
     size_usd = min(size_usd, C.SPECIALIST_MAX_TRADE_USD)
     size_usd = max(size_usd, C.SPECIALIST_MIN_TRADE_USD)
 
