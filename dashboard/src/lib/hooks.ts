@@ -129,31 +129,23 @@ export function timeAgo(dateStr: string): string {
   return `${mins}m`;
 }
 
-/** Format an ISO timestamp as "HH:MM" today, "Mon HH:MM" within a week, else "MM-DD". */
+/**
+ * Format an ISO timestamp as "HH:MMh" in Europe/Madrid time.
+ * Renders the same string server-side and client-side regardless of the
+ * viewer's browser locale (uses Intl with a fixed timeZone).
+ */
 export function formatClosesAt(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return "—";
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    const hm = `${d.getHours().toString().padStart(2, "0")}:${d
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}`;
-    if (sameDay) return hm;
-    const diffDays = Math.floor((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays >= -1 && diffDays <= 6) {
-      const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
-      return `${weekday} ${hm}`;
-    }
-    return `${(d.getMonth() + 1).toString().padStart(2, "0")}-${d
-      .getDate()
-      .toString()
-      .padStart(2, "0")} ${hm}`;
+    const hm = new Intl.DateTimeFormat("es-ES", {
+      timeZone: "Europe/Madrid",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(d);
+    return `${hm}h`;
   } catch {
     return "—";
   }

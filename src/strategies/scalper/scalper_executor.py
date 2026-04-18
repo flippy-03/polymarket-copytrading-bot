@@ -41,6 +41,48 @@ class ScalperExecutor:
         if self._owns_data:
             self.data.close()
 
+    # ── titular enrichment ───────────────────────────────
+
+    def _get_titular_stats(self, titular: str, market_type: str) -> dict:
+        """Fetch titular hit rate (for this market_type) and composite_score.
+
+        Used to enrich trade metadata so the dashboard can display Avg HR / EV
+        without additional queries. Errors swallowed — the metadata fields are
+        rendered as "—" when absent.
+        """
+        out: dict = {}
+        try:
+            client = _db.get_client()
+            prof = (
+                client.table("wallet_profiles")
+                .select("type_hit_rates")
+                .eq("wallet", titular)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if prof:
+                type_hrs = (prof[0] or {}).get("type_hit_rates") or {}
+                hr = type_hrs.get(market_type)
+                if hr is not None:
+                    out["avg_hit_rate"] = float(hr)
+            pool = (
+                client.table("scalper_pool")
+                .select("composite_score")
+                .eq("run_id", self.run_id)
+                .eq("wallet_address", titular)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if pool:
+                cs = (pool[0] or {}).get("composite_score")
+                if cs is not None:
+                    out["composite_score"] = float(cs)
+        except Exception as e:
+            logger.debug(f"_get_titular_stats({titular[:10]}): {e}")
+        return out
+
     # ── open ─────────────────────────────────────────────
 
     def mirror_open(
@@ -100,11 +142,22 @@ class ScalperExecutor:
             if existing:
                 return None
 
+        # Enrich metadata with titular-level KPIs so dashboard can show
+        # Avg HR, EV, composite score per trade without joins.
+        stats = self._get_titular_stats(titular, market_type)
+
         metadata = {
             "titular": titular,
             "titular_usdc": _usdc(trade),
             "titular_price": float(trade.get("price") or 0),
             "market_type": market_type,
+            "avg_hit_rate": stats.get("avg_hit_rate"),
+            "composite_score": stats.get("composite_score"),
+            "closes_at": (
+                trade.get("gameStartTime")
+                or trade.get("endDate")
+                or trade.get("endDateIso")
+            ),
         }
         if force_shadow and shadow_reason:
             metadata["filter_reason"] = shadow_reason
