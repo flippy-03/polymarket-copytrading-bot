@@ -190,7 +190,15 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
     time_bonus = min(1.0, 6.0 / hours) ** 0.25
     compound_roi = expected_roi * time_bonus
 
+    # Gamma API nests event info under `events` (list). The flat `eventSlug`
+    # key is only present in some endpoints — fall back to events[0].slug.
     event_slug = analysis.market.get("eventSlug") or analysis.market.get("event_slug")
+    if not event_slug:
+        events_list = analysis.market.get("events") or []
+        if isinstance(events_list, list) and events_list:
+            first_event = events_list[0] or {}
+            if isinstance(first_event, dict):
+                event_slug = first_event.get("slug")
 
     return Signal(
         market=analysis.market,
