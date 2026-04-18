@@ -23,9 +23,7 @@ const TRADE_COLUMNS =
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const strategy = resolveStrategy(request);
-  const shadowMode = resolveShadowMode(request);
-  const runId = await resolveRunId(request, strategy);
+  const sourceWallet = searchParams.get("source_wallet");
   const status = searchParams.get("status"); // OPEN, CLOSED, or null (all)
   const since = searchParams.get("since");
   const requested = parseInt(searchParams.get("limit") ?? "100");
@@ -34,16 +32,27 @@ export async function GET(request: Request) {
     MAX_LIMIT,
   );
 
+  // Branch A: filter by source_wallet (Trade History in wallet drawer).
+  // Skip strategy/run/shadow filters — we want everything we've observed for
+  // this wallet across strategies.
   let query = supabase
     .from("copy_trades")
     .select(TRADE_COLUMNS)
-    .eq("strategy", strategy)
     .order("opened_at", { ascending: false })
     .limit(limit);
 
-  if (runId) query = query.eq("run_id", runId);
-  const isShadow = isShadowFilter(shadowMode);
-  if (isShadow !== null) query = query.eq("is_shadow", isShadow);
+  if (sourceWallet) {
+    query = query.eq("source_wallet", sourceWallet);
+  } else {
+    // Branch B: standard dashboard filters (strategy + run + shadow).
+    const strategy = resolveStrategy(request);
+    const shadowMode = resolveShadowMode(request);
+    const runId = await resolveRunId(request, strategy);
+    query = query.eq("strategy", strategy);
+    if (runId) query = query.eq("run_id", runId);
+    const isShadow = isShadowFilter(shadowMode);
+    if (isShadow !== null) query = query.eq("is_shadow", isShadow);
+  }
   if (status) query = query.eq("status", status);
   if (since) query = query.gte("opened_at", since);
 

@@ -1,22 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { TraderStatsWidget } from "./TraderStatsWidget";
 
 type Props = {
   wallet: string;
   width?: number;
   height?: number;
-  // When `hoverMode` is true the iframe is lazy-loaded on a 300ms debounce so a
-  // fast scroll over a list doesn't fire dozens of requests.
+  // When `hoverMode` is true the widget defers its fetch by 300 ms so a fast
+  // scroll over a list doesn't fire dozens of requests.
   hoverMode?: boolean;
 };
 
 /**
- * Lightweight wrapper around the polymarketscan.org trader widget.
+ * Drop-in wrapper around our own `TraderStatsWidget`.
  *
- * In `hoverMode`, the iframe only mounts after the component has been rendered
- * for 300ms. That lets us drop it into a popover that shows on row hover
- * without hammering the remote service.
+ * Originally this component embedded polymarketscan.org's iframe, but the
+ * remote widget stopped loading reliably, so the whole visual has been
+ * replaced by a native widget sourced from our own wallet_profiles data.
+ *
+ * Kept as a named component to preserve the existing import paths.
  */
 export function PolymarketScanEmbed({
   wallet,
@@ -24,54 +26,13 @@ export function PolymarketScanEmbed({
   height = 400,
   hoverMode = false,
 }: Props) {
-  const [visible, setVisible] = useState(!hoverMode);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!hoverMode) {
-      setVisible(true);
-      return;
-    }
-    timer.current = setTimeout(() => setVisible(true), 300);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [hoverMode, wallet]);
-
-  if (!visible) {
-    return (
-      <div
-        style={{
-          width,
-          height,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--text-secondary)",
-          fontSize: 12,
-          borderRadius: 12,
-          border: "1px solid var(--border)",
-          background: "var(--bg-secondary)",
-        }}
-      >
-        Loading polymarketscan…
-      </div>
-    );
-  }
-
-  const src = `https://polymarketscan.org/embed/trader/${wallet}?theme=dark`;
   return (
-    <iframe
-      src={src}
+    <TraderStatsWidget
+      wallet={wallet}
       width={width}
       height={height}
-      frameBorder={0}
-      style={{
-        borderRadius: 12,
-        border: "1px solid #333",
-        background: "var(--bg-secondary)",
-      }}
-      loading="lazy"
+      hoverMode={hoverMode}
+      compact={hoverMode}
     />
   );
 }

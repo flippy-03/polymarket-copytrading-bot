@@ -10,6 +10,25 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const refreshCache = new Map<string, unknown>();
 
 /**
+ * Populate the auto-refresh cache without mounting a component. Used by the
+ * home page to warm up the other strategy's data right after initial load,
+ * so the first strategy switch happens instantly instead of waiting for the
+ * first fetch.
+ *
+ * Cache keys must match those used by `useAutoRefresh(fetcher, interval, cacheKey)`.
+ */
+export function prefetchIntoCache<T>(cacheKey: string, fetcher: () => Promise<T>): void {
+  if (refreshCache.has(cacheKey)) return; // already warm
+  fetcher()
+    .then((result) => {
+      refreshCache.set(cacheKey, result);
+    })
+    .catch(() => {
+      // Swallow — the next real mount of useAutoRefresh will retry.
+    });
+}
+
+/**
  * Poll `fetcher` every `intervalMs` — but pause while the browser tab is
  * hidden (Page Visibility API). Resumes with an immediate fetch when the tab
  * becomes visible again.

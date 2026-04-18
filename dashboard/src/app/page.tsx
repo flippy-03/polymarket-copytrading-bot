@@ -3,7 +3,7 @@
 // Mirrors src/strategies/common/config.py MAX_DRAWDOWN_PCT
 const C_MAX_DRAWDOWN_PCT = 0.30;
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -22,6 +22,7 @@ import {
   formatPnl,
   getDateFromFilter,
   pnlColor,
+  prefetchIntoCache,
   timeAgo,
   useAutoRefresh,
 } from "@/lib/hooks";
@@ -80,6 +81,28 @@ export default function DashboardPage() {
     300000,
     `equity:${ctx}`,
   );
+
+  // ── Prefetch both strategies' portfolio+positions in the background so the
+  // first strategy switch is instant (the cache is already warm). Runs once
+  // per shadowMode change. Only fires after the current context has been
+  // resolved to avoid clashing with the primary fetches above.
+  useEffect(() => {
+    const strategies: ("SPECIALIST" | "SCALPER")[] = ["SPECIALIST", "SCALPER"];
+    const timer = setTimeout(() => {
+      for (const s of strategies) {
+        const otherCtx = ctxQueryString(s, null, shadowMode);
+        prefetchIntoCache(`portfolio:${otherCtx}`, () =>
+          fetch(`/api/portfolio?${otherCtx}`)
+            .then((r) => r.json())
+            .then((p) => (p && p.both ? p.real ?? p.shadow : p)),
+        );
+        prefetchIntoCache(`positions:${otherCtx}`, () =>
+          fetch(`/api/positions?${otherCtx}`).then((r) => r.json()),
+        );
+      }
+    }, 800); // after the primary fetches settle
+    return () => clearTimeout(timer);
+  }, [shadowMode]);
 
   const equityCurve = (() => {
     const list = rawAllTrades ?? [];
@@ -367,10 +390,14 @@ export default function DashboardPage() {
                 {shadowMode === "BOTH" && (
                   <th className="text-center px-3 py-2 font-medium">Type</th>
                 )}
+                {strategy !== "SCALPER" && (
+                  <th className="text-center px-3 py-2 font-medium">Signal</th>
+                )}
                 <th className="text-right px-3 py-2 font-medium">Size</th>
-                <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
-                <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                {strategy !== "SCALPER" && (
+                  <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                )}
                 <th className="text-right px-3 py-2 font-medium" title="Average historical hit rate of signaling specialists">Avg HR</th>
                 <th className="text-right px-3 py-2 font-medium" title="EV = avg hit rate − entry price · positive = odds on your side">EV</th>
                 <th className="text-right px-3 py-2 font-medium">SL / TP</th>
@@ -394,7 +421,6 @@ export default function DashboardPage() {
                 const specsFor = meta.specialists_count != null ? Number(meta.specialists_count) : null;
                 const specsAgainst = meta.specialists_against != null ? Number(meta.specialists_against) : null;
                 const avgHr = meta.avg_hit_rate != null ? Number(meta.avg_hit_rate) : null;
-                const ratio = meta.ratio != null ? Number(meta.ratio) : null;
                 const ev = computeEV(avgHr, entry);
                 const closesAt = meta.closes_at as string | undefined;
                 return (
@@ -427,14 +453,12 @@ export default function DashboardPage() {
                         </span>
                       </td>
                     )}
-                    <td className="text-right px-3 py-2.5 font-medium">
-                      ${Number(p.position_usd ?? 0).toFixed(2)}
-                    </td>
-                    <td className="text-center px-3 py-2.5">
-                      {quality ? (
-                        <span title={universe}>
+                    {strategy !== "SCALPER" && (
+                      <td className="text-center px-3 py-2.5">
+                        {quality ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-xs font-bold"
+                            title={universe}
                             style={
                               quality === "CLEAN"
                                 ? { background: "var(--green-dim)", color: "var(--green)" }
@@ -445,30 +469,30 @@ export default function DashboardPage() {
                           >
                             {quality}
                           </span>
-                          {ratio != null && (
-                            <span className="ml-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
-                              {ratio.toFixed(1)}×
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)" }}>—</span>
-                      )}
+                        ) : (
+                          <span style={{ color: "var(--text-secondary)" }}>—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="text-right px-3 py-2.5 font-medium">
+                      ${Number(p.position_usd ?? 0).toFixed(2)}
                     </td>
                     <td className="text-right px-3 py-2.5">
                       ${entry.toFixed(3)}
                     </td>
-                    <td className="text-center px-3 py-2.5 text-xs">
-                      {specsFor != null ? (
-                        <span>
-                          <span style={{ color: "var(--green)" }}>{specsFor}</span>
-                          <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
-                          <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)" }}>—</span>
-                      )}
-                    </td>
+                    {strategy !== "SCALPER" && (
+                      <td className="text-center px-3 py-2.5 text-xs">
+                        {specsFor != null ? (
+                          <span>
+                            <span style={{ color: "var(--green)" }}>{specsFor}</span>
+                            <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
+                            <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-secondary)" }}>—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="text-right px-3 py-2.5 text-xs">
                       {avgHr != null ? `${(avgHr * 100).toFixed(0)}%` : <span style={{ color: "var(--text-secondary)" }}>—</span>}
                     </td>
@@ -515,7 +539,13 @@ export default function DashboardPage() {
               })}
               {(positions ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={shadowMode === "BOTH" ? 13 : 12} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td
+                    colSpan={
+                      (shadowMode === "BOTH" ? 13 : 12) - (strategy === "SCALPER" ? 2 : 0)
+                    }
+                    className="px-5 py-8 text-center"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
                     No open positions
                   </td>
                 </tr>
@@ -554,11 +584,15 @@ export default function DashboardPage() {
                 {shadowMode === "BOTH" && (
                   <th className="text-center px-3 py-2 font-medium">Type</th>
                 )}
+                {strategy !== "SCALPER" && (
+                  <th className="text-center px-3 py-2 font-medium">Signal</th>
+                )}
                 <th className="text-right px-3 py-2 font-medium">Size</th>
-                <th className="text-center px-3 py-2 font-medium">Signal</th>
                 <th className="text-right px-3 py-2 font-medium">Entry</th>
                 <th className="text-right px-3 py-2 font-medium">Exit</th>
-                <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                {strategy !== "SCALPER" && (
+                  <th className="text-center px-3 py-2 font-medium" title="Specialists in favor / against">Specs</th>
+                )}
                 <th className="text-right px-3 py-2 font-medium" title="Average historical hit rate of signaling specialists">Avg HR</th>
                 <th className="text-right px-3 py-2 font-medium" title="EV = avg hit rate − entry price at open">EV</th>
                 <th className="text-right px-3 py-2 font-medium">P&L</th>
@@ -575,7 +609,6 @@ export default function DashboardPage() {
                 const specsFor = meta.specialists_count != null ? Number(meta.specialists_count) : null;
                 const specsAgainst = meta.specialists_against != null ? Number(meta.specialists_against) : null;
                 const avgHr = meta.avg_hit_rate != null ? Number(meta.avg_hit_rate) : null;
-                const ratio = meta.ratio != null ? Number(meta.ratio) : null;
                 const entryPx = Number(t.entry_price ?? 0);
                 const ev = computeEV(avgHr, entryPx);
                 return (
@@ -615,12 +648,9 @@ export default function DashboardPage() {
                         </span>
                       </td>
                     )}
-                    <td className="text-right px-3 py-2.5 font-medium">
-                      ${Number(t.position_usd ?? 0).toFixed(2)}
-                    </td>
-                    <td className="text-center px-3 py-2.5">
-                      {quality ? (
-                        <span>
+                    {strategy !== "SCALPER" && (
+                      <td className="text-center px-3 py-2.5">
+                        {quality ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-xs font-bold"
                             style={
@@ -633,15 +663,13 @@ export default function DashboardPage() {
                           >
                             {quality}
                           </span>
-                          {ratio != null && (
-                            <span className="ml-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
-                              {ratio.toFixed(1)}×
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)" }}>—</span>
-                      )}
+                        ) : (
+                          <span style={{ color: "var(--text-secondary)" }}>—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="text-right px-3 py-2.5 font-medium">
+                      ${Number(t.position_usd ?? 0).toFixed(2)}
                     </td>
                     <td className="text-right px-3 py-2.5">
                       ${entryPx.toFixed(3)}
@@ -649,17 +677,19 @@ export default function DashboardPage() {
                     <td className="text-right px-3 py-2.5">
                       {t.exit_price != null ? `$${Number(t.exit_price).toFixed(3)}` : "—"}
                     </td>
-                    <td className="text-center px-3 py-2.5 text-xs">
-                      {specsFor != null ? (
-                        <span>
-                          <span style={{ color: "var(--green)" }}>{specsFor}</span>
-                          <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
-                          <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)" }}>—</span>
-                      )}
-                    </td>
+                    {strategy !== "SCALPER" && (
+                      <td className="text-center px-3 py-2.5 text-xs">
+                        {specsFor != null ? (
+                          <span>
+                            <span style={{ color: "var(--green)" }}>{specsFor}</span>
+                            <span style={{ color: "var(--text-secondary)" }}>{" / "}</span>
+                            <span style={{ color: "var(--red)" }}>{specsAgainst ?? 0}</span>
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-secondary)" }}>—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="text-right px-3 py-2.5 text-xs">
                       {avgHr != null ? `${(avgHr * 100).toFixed(0)}%` : <span style={{ color: "var(--text-secondary)" }}>—</span>}
                     </td>
@@ -693,7 +723,13 @@ export default function DashboardPage() {
               })}
               {(trades ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={shadowMode === "BOTH" ? 14 : 13} className="px-5 py-8 text-center" style={{ color: "var(--text-secondary)" }}>
+                  <td
+                    colSpan={
+                      (shadowMode === "BOTH" ? 14 : 13) - (strategy === "SCALPER" ? 2 : 0)
+                    }
+                    className="px-5 py-8 text-center"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
                     No trades in this period
                   </td>
                 </tr>

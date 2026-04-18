@@ -38,6 +38,55 @@ function timeAgo(ts?: number | null): string {
   return `${Math.floor(secs / 86400)}d`;
 }
 
+/**
+ * Rarity gem — a colored diamond/rhombus shape that sits inline with text.
+ * Height = 0.85em so it aligns optically with the capital letters of the
+ * archetype label it follows.
+ */
+function RarityGem({ color, label }: { color: string; label: string }) {
+  return (
+    <span
+      aria-label={label}
+      title={label}
+      style={{
+        display: "inline-block",
+        width: "0.75em",
+        height: "0.75em",
+        background: `linear-gradient(135deg, ${color} 0%, ${color}aa 50%, ${color} 100%)`,
+        clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0 38%)",
+        boxShadow: `0 0 6px ${color}aa, inset 0 0 2px rgba(255,255,255,0.5)`,
+        marginLeft: 4,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/**
+ * Decorative bookmark ribbon in the top-right corner of the card. Uses the
+ * archetype color (distinct visual channel from the rarity gem). Purely
+ * visual — no click handler. Shift stars to the left of the header so they
+ * don't overlap with it.
+ */
+function BookmarkCorner({ color }: { color: string }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        top: -3,
+        right: 14,
+        width: 16,
+        height: 24,
+        background: `linear-gradient(180deg, ${color} 0%, ${color}cc 100%)`,
+        clipPath: "polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%)",
+        filter: `drop-shadow(0 2px 4px ${color}88)`,
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
 export function WalletProfileCard({ row, onClick }: Props) {
   const profile = row.profile || null;
   const archetypeId = (profile?.primary_archetype as string) || "UNKNOWN";
@@ -74,12 +123,15 @@ export function WalletProfileCard({ row, onClick }: Props) {
       onClick={() => onClick?.(row.wallet_address)}
       className="text-left w-full"
       style={{
+        position: "relative",
         borderRadius: 14,
-        padding: 2,
-        background: `linear-gradient(180deg, ${archetype.color}55 0%, ${archetype.color}11 100%)`,
-        boxShadow: rarityStyle.glow,
-        border: `1.5px solid ${rarityStyle.color}`,
+        padding: 1,
+        // Subtle background gradient: archetype color tint at top fading to card bg
+        background: `linear-gradient(180deg, ${archetype.color}33 0%, ${archetype.color}08 55%, transparent 100%)`,
+        boxShadow: rarityStyle.glow, // glow persists to signal rarity tier
+        border: "1px solid var(--border)",
         transition: "transform 120ms ease, box-shadow 120ms ease",
+        overflow: "visible", // let bookmark poke out
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = "translateY(-2px) scale(1.01)";
@@ -88,15 +140,21 @@ export function WalletProfileCard({ row, onClick }: Props) {
         e.currentTarget.style.transform = "";
       }}
     >
+      {/* Decorative bookmark in top-right corner */}
+      <BookmarkCorner color={archetype.color} />
+
       <div
         style={{
-          borderRadius: 12,
-          background: "var(--bg-card)",
+          position: "relative",
+          borderRadius: 13,
+          // Diagonal felt gradient — gives the card-game depth without being loud
+          background: `linear-gradient(135deg, var(--bg-card) 0%, ${archetype.colorDim} 100%)`,
           padding: 14,
           display: "flex",
           flexDirection: "column",
           gap: 10,
           minHeight: 280,
+          overflow: "hidden",
         }}
       >
         {/* ── Header banner ───────────────────────────────── */}
@@ -108,30 +166,41 @@ export function WalletProfileCard({ row, onClick }: Props) {
             padding: "8px 10px",
             borderRadius: 8,
             background: archetype.colorDim,
-            borderBottom: `1px solid ${archetype.color}66`,
+            borderBottom: `1px solid ${archetype.color}44`,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>{archetype.icon}</span>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: archetype.color }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            {/* Stars moved to the LEFT so the bookmark doesn't overlap them */}
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: rarityStyle.color,
+                letterSpacing: 1,
+                flexShrink: 0,
+              }}
+              title={rarityStyle.label}
+            >
+              {rarityStyle.stars}
+            </span>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>{archetype.icon}</span>
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: archetype.color,
+                  display: "inline-flex",
+                  alignItems: "center",
+                }}
+              >
                 {archetype.label.toUpperCase()}
+                <RarityGem color={rarityStyle.color} label={rarityStyle.label} />
               </div>
               <div style={{ fontSize: 9, color: "var(--text-secondary)", letterSpacing: 0.5 }}>
-                {archetype.hsClass} · {rarityStyle.label}
+                {archetype.hsClass}
               </div>
             </div>
-          </div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: rarityStyle.color,
-              letterSpacing: 1,
-            }}
-            title={rarityStyle.label}
-          >
-            {rarityStyle.stars}
           </div>
         </div>
 
