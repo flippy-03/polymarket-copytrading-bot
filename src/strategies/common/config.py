@@ -90,6 +90,25 @@ SCALPER_MIN_PER_TRADE = 5               # floor in USD
 SCALPER_BONUS_PCT = 0.05                # +5% allocation for titulars with 3+ consecutive wins
 SCALPER_MAX_OPEN_POSITIONS = 16         # global sanity cap (capital is the real limit)
 
+# v3.0: Never copy these market types even if a titular's profile shows edge on
+# them. Micro-timeframe (5-15 min) binary markets are near-random for a copy
+# bot because the system's latency + titular's decision latency already consumed
+# any edge. "unclassified" and "other" are catch-all buckets that let in
+# unknown markets silently — default-deny is safer than default-allow.
+SCALPER_BLOCKED_MARKET_TYPES = frozenset({
+    "unclassified",
+    "other",
+    "crypto_updown_micro",
+    "crypto_updown_short",
+})
+
+# v3.0: wallet health gate — skip titulars whose current portfolio_value on
+# Polymarket data-api is below this threshold (essentially wiped out).
+SCALPER_MIN_TITULAR_PORTFOLIO_USD = 100.0
+# v3.0: skip titulars where enricher HR diverges from last-30d actual WR by
+# more than this (in percentage points). Protects against stale/inflated HR.
+SCALPER_MAX_HR_WR_DIVERGENCE = 0.20
+
 # V2 rotation & cooldown
 SCALPER_HEALTH_CHECK_HOURS = 72         # hours between health checks (no forced weekly rotation)
 SCALPER_COOLDOWN_DAYS_BASE = 30         # base cooldown for removed titulars
@@ -142,11 +161,18 @@ SPEC_MAX_INACTIVE_DAYS = 14         # Must have been active within 14 days
 SPEC_MAX_RANKING_SIZE = 200         # Max specialists per universe in DB
 
 # Signal quality thresholds (spec §8)
-SIGNAL_CLEAN_RATIO = 2.5            # specialists_for / specialists_against >= 2.5
-SIGNAL_CONTESTED_RATIO = 1.5        # ratio >= 1.5 but < 2.5
-SIGNAL_MIN_SPECIALISTS = 2          # At least 2 known specialists on winning side
+# v3.0: raised after v2.1 review — CLEAN @ 2.5× and 2 specialists produced
+# WR 11% in 15 real trades. Specialist count <4 produced WR 0%. Matching the
+# empirical distribution instead of the original optimistic thresholds.
+SIGNAL_CLEAN_RATIO = 3.0            # was 2.5
+SIGNAL_CONTESTED_RATIO = 2.0        # was 1.5
+SIGNAL_MIN_SPECIALISTS = 4          # was 2
 SIGNAL_CONFLICT_PENALTY = 0.30      # Penalty when both sides have specialists
-SPECIALIST_CONTESTED_SIZE_MULT = 0.30  # CONTESTED signals sized at 30% of CLEAN (v2.0: HR 16.7% vs 75% CLEAN)
+SPECIALIST_CONTESTED_SIZE_MULT = 0.30  # CONTESTED signals sized at 30% of CLEAN
+# v3.0: expected-value gate on entry. EV = avg_hit_rate - entry_price. If the
+# market already prices in more probability than specialists estimate, we'd be
+# overpaying for consensus information. Default 0 = reject any negative EV.
+EV_MIN_ENTRY = 0.0
 
 # Market filtering for routing
 SPECIALIST_MARKET_MIN_VOLUME_24H = 50_000  # $50K min 24h volume

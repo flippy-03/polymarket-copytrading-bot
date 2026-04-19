@@ -211,7 +211,7 @@ def close_paper_trade(trade_id: str, reason: str) -> None:
     client = _db.get_client()
     _CLOSE_COLS = (
         "id,status,is_shadow,outcome_token_id,shares,"
-        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id,source_wallet"
     )
     result = client.table("copy_trades").select(_CLOSE_COLS).eq("id", trade_id).limit(1).execute()
     if not result.data:
@@ -238,6 +238,8 @@ def close_paper_trade(trade_id: str, reason: str) -> None:
     _decrement_open_positions(t["strategy"], t["run_id"], False)
     risk.update_peak_capital(t["strategy"], run_id=t["run_id"])
     risk.register_loss_and_maybe_break(t["strategy"], pnl_pct, run_id=t["run_id"])
+    if t["strategy"] == "SCALPER" and t.get("source_wallet"):
+        risk.register_titular_loss(t["source_wallet"], pnl_pct, run_id=t["run_id"])
     logger.info(f"[{t['strategy']}] CLOSE {trade_id[:8]} @ {exit_price:.3f} PnL=${pnl_usd:.2f} ({pnl_pct:+.1%}) — {reason}")
 
 
@@ -356,7 +358,7 @@ def _close_real_at_price(trade_id: str, exit_price: float, reason: str) -> None:
     client = _sdb.get_client()
     _COLS = (
         "id,status,is_shadow,outcome_token_id,shares,"
-        "entry_price,position_usd,strategy,run_id,market_polymarket_id"
+        "entry_price,position_usd,strategy,run_id,market_polymarket_id,source_wallet"
     )
     result = client.table("copy_trades").select(_COLS).eq("id", trade_id).limit(1).execute()
     if not result.data:
@@ -370,6 +372,8 @@ def _close_real_at_price(trade_id: str, exit_price: float, reason: str) -> None:
     _decrement_open_positions(t["strategy"], t["run_id"], False)
     risk.update_peak_capital(t["strategy"], run_id=t["run_id"])
     risk.register_loss_and_maybe_break(t["strategy"], pnl_pct, run_id=t["run_id"])
+    if t["strategy"] == "SCALPER" and t.get("source_wallet"):
+        risk.register_titular_loss(t["source_wallet"], pnl_pct, run_id=t["run_id"])
     logger.info(
         f"[{t['strategy']}] RESOLVED {trade_id[:8]} @ {exit_price:.3f} "
         f"PnL=${pnl_usd:.2f} ({pnl_pct:+.1%}) — {reason}"

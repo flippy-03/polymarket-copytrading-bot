@@ -83,6 +83,32 @@ class ScalperExecutor:
             logger.debug(f"_get_titular_stats({titular[:10]}): {e}")
         return out
 
+    def _get_approved_types(self, titular: str) -> set[str] | None:
+        """Fetch the titular's approved_market_types from scalper_pool.
+
+        Returns None if the lookup fails (allow-all fallback, we'd rather
+        copy than silently drop trades if the DB hiccups). Returns a set
+        otherwise — membership check in O(1) at call site.
+        """
+        try:
+            client = _db.get_client()
+            row = (
+                client.table("scalper_pool")
+                .select("approved_market_types")
+                .eq("run_id", self.run_id)
+                .eq("wallet_address", titular)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if row:
+                approved = (row[0] or {}).get("approved_market_types") or []
+                if isinstance(approved, list) and approved:
+                    return set(approved)
+        except Exception as e:
+            logger.debug(f"_get_approved_types({titular[:10]}): {e}")
+        return None
+
     # ── open ─────────────────────────────────────────────
 
     def mirror_open(
@@ -110,6 +136,22 @@ class ScalperExecutor:
         outcome = (trade.get("outcome") or "").strip()
         direction = "YES" if outcome.lower().startswith("y") else "NO"
         market_type = classify(trade)
+
+        # v3.0: hard-block market types known to destroy edge in copy-trading
+        # (micro-timeframe crypto, unclassified). Force shadow so we still
+        # observe the decision but don't risk real capital.
+        if market_type in C.SCALPER_BLOCKED_MARKET_TYPES:
+            force_shadow = True
+            shadow_reason = shadow_reason or f"blocked_type:{market_type}"
+
+        # v3.0: also block if the titular's approved_market_types (from pool
+        # selector) doesn't include this type. Titulars are selected based on
+        # their edge in specific market types — copying them outside those
+        # types has no justification.
+        approved = self._get_approved_types(titular)
+        if approved is not None and market_type not in approved:
+            force_shadow = True
+            shadow_reason = shadow_reason or f"type_not_approved:{market_type}"
 
         # Compute portfolio-relative size
         size_usd = self._sizer.compute_trade_size(titular)
@@ -171,7 +213,7 @@ class ScalperExecutor:
             run_id=self.run_id,
             source_wallet=titular,
             market_question=trade.get("title") or trade.get("question"),
-            market_category=None,
+            market_category=market_type,
             metadata=metadata,
         )
 

@@ -735,12 +735,35 @@ def get_copy_trade(trade_id: str) -> dict | None:
 # scalper_pool, or both — strategies_active holds the context.
 
 def upsert_wallet_profile(profile: dict) -> None:
-    """Upsert a full wallet profile row. `profile` must contain `wallet`."""
+    """Upsert a full wallet profile row. `profile` must contain `wallet`.
+
+    If the DB rejects the row because a column doesn't exist (migration not
+    applied yet), retry once with the unknown columns stripped. This makes
+    v3.0 rollout resilient — the migration can be applied after deploy.
+    """
     if not profile.get("wallet"):
         raise ValueError("upsert_wallet_profile: profile missing wallet")
     try:
         _db.upsert("wallet_profiles", profile, on_conflict="wallet")
     except Exception as e:
+        msg = str(e)
+        # Postgres "column X of relation Y does not exist" — retry without it
+        import re
+        m = re.search(r"column [\"']?([\w_]+)[\"']? of relation", msg)
+        if m and m.group(1) in profile:
+            stripped_col = m.group(1)
+            cleaned = {k: v for k, v in profile.items() if k != stripped_col}
+            logger.warning(
+                f"upsert_wallet_profile {profile['wallet'][:10]}…: column "
+                f"'{stripped_col}' missing — retrying without it. "
+                f"Apply migration 013 to enable."
+            )
+            try:
+                _db.upsert("wallet_profiles", cleaned, on_conflict="wallet")
+                return
+            except Exception as e2:
+                logger.warning(f"upsert_wallet_profile retry failed: {e2}")
+                return
         logger.warning(f"upsert_wallet_profile {profile['wallet'][:10]}…: {e}")
 
 

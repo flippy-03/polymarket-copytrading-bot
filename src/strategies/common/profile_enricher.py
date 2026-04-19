@@ -160,6 +160,13 @@ class ProfileEnricher:
         # Block 6 — Temporal & momentum
         profile.update(_compute_temporal_kpis(trades, pos_pnl, pos_open))
 
+        # v3.0: recent-window actual WR (last 30 days) — used to detect when
+        # the aggregate type_hit_rates diverges from recent real performance.
+        # We compute this separately from type_hit_rates (which spans 120d).
+        profile["last_30d_actual_wr"] = _compute_last_30d_actual_wr(
+            trades, pos_pnl, pos_open
+        )
+
         # Bot flag is computed from raw trades (heuristic reused from specialist_profiler)
         is_bot = _is_bot_heuristic(trades) if len(trades) >= 20 else False
 
@@ -250,6 +257,48 @@ def _pnl_for_cid(
         return None
     buys = [t for t in mkt_trades if t.get("side") == "BUY"]
     return sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)
+
+
+def _compute_last_30d_actual_wr(
+    trades: list[dict],
+    pos_pnl: dict[str, float],
+    pos_open: set[str],
+) -> Optional[float]:
+    """Last-30d actual win rate over cashPnl-resolved trades only.
+
+    Separate from `type_hit_rates` which averages across 120 days. Used to
+    detect when a titular's historical HR is no longer representative of
+    current performance (the 57pp gap we saw in v2.1 run).
+
+    Returns None if fewer than 5 resolved trades in the window (not enough
+    statistical signal to block anyone).
+    """
+    import time as _time
+    cutoff = int(_time.time()) - 30 * 86400
+
+    by_cid = _group_trades_by_cid(trades)
+    wins = 0
+    resolved = 0
+    for cid, mkt_trades in by_cid.items():
+        # Only trades where the most recent action is within 30d
+        latest_ts = max(
+            int(t.get("timestamp") or t.get("createdAt") or 0) for t in mkt_trades
+        )
+        if latest_ts < cutoff:
+            continue
+        # Prefer cashPnl-confirmed outcomes (authoritative). Skip open or
+        # indeterminate — we want true WR, not a speculative count.
+        if cid in pos_open:
+            continue
+        if cid not in pos_pnl:
+            continue
+        resolved += 1
+        if pos_pnl[cid] > 0:
+            wins += 1
+
+    if resolved < 5:
+        return None
+    return round(wins / resolved, 4)
 
 
 def _compute_coverage_kpis(

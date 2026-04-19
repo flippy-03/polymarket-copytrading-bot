@@ -172,6 +172,16 @@ def generate_signal(analysis: MarketAnalysis) -> Optional[Signal]:
     if entry_price <= 0:
         return _skip(analysis, "zero_price")
 
+    # v3.0: EV gate — if the entry price already reflects (or exceeds) the
+    # specialists' avg historical hit rate, we'd be paying more than the
+    # estimated true probability. Skip unless avg_hit_rate > entry_price.
+    ev = dominant.avg_hit_rate - entry_price
+    if ev < C.EV_MIN_ENTRY:
+        return _skip(
+            analysis,
+            f"negative_ev={ev:+.3f} (hr={dominant.avg_hit_rate:.2f} entry={entry_price:.2f})",
+        )
+
     potential_roi = (1.0 / entry_price) - 1.0
 
     # Confidence based on quality

@@ -15,9 +15,40 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+import requests
+
 from src.strategies.common import config as C, db
 from src.strategies.specialist.market_type_classifier import classify  # noqa: F401
 from src.utils.logger import logger
+
+
+def _wallet_is_healthy(wallet: str) -> bool:
+    """Check the titular's current Polymarket portfolio_value.
+
+    A wallet with value below the configured floor has either been wiped out
+    or is inactive — copying it has no justification no matter how good its
+    historical profile looks. Network errors fall through as healthy (we'd
+    rather miss the gate than block all candidates when the API blips).
+    """
+    try:
+        r = requests.get(
+            f"{C.DATA_API}/value?user={wallet}&window=all",
+            timeout=5,
+        )
+        data = r.json()
+        if not isinstance(data, list) or not data:
+            return True
+        value = float(data[0].get("value") or 0)
+        if value < C.SCALPER_MIN_TITULAR_PORTFOLIO_USD:
+            logger.warning(
+                f"Skip {wallet[:10]}… portfolio_value=${value:.0f} "
+                f"(floor=${C.SCALPER_MIN_TITULAR_PORTFOLIO_USD:.0f})"
+            )
+            return False
+        return True
+    except Exception as e:
+        logger.debug(f"_wallet_is_healthy({wallet[:10]}) error: {e}")
+        return True
 
 
 @dataclass
@@ -78,6 +109,25 @@ class ScalperPoolSelector:
             type_pfs = profile.get("type_profit_factors") or {}
             type_tcs = profile.get("type_trade_counts") or {}
             type_sharpes = profile.get("type_sharpe_ratios") or {}
+
+            # v3.0: divergence gate — if the titular's best_type_hit_rate
+            # differs from recent actual WR by more than the configured limit,
+            # the profile metrics are stale and we skip them entirely.
+            best_hr = profile.get("best_type_hit_rate")
+            recent_wr = profile.get("last_30d_actual_wr")
+            if best_hr is not None and recent_wr is not None:
+                divergence = abs(float(best_hr) - float(recent_wr))
+                if divergence > C.SCALPER_MAX_HR_WR_DIVERGENCE:
+                    logger.warning(
+                        f"Skip {wallet[:10]}… HR/WR divergence={divergence:.2f} "
+                        f"(best_hr={best_hr:.2f} vs last_30d_wr={recent_wr:.2f})"
+                    )
+                    continue
+
+            # v3.0: wallet-health gate — skip titulars whose live Polymarket
+            # portfolio value is below threshold (essentially wiped out).
+            if not _wallet_is_healthy(wallet):
+                continue
 
             for mtype, hr in type_hrs.items():
                 tc = type_tcs.get(mtype, 0)
@@ -272,7 +322,14 @@ def _build_candidate(
         if score >= 0.0:
             type_scores[mtype] = score
 
-    approved = [t for t, s in type_scores.items() if s >= 0.50]
+    # v3.0: strip blocked market types from the approved list. Even if a
+    # titular shows strong stats on micro-timeframe crypto or unclassified
+    # markets, we refuse to copy them because the edge doesn't survive the
+    # latency from source observation → our order.
+    approved = [
+        t for t, s in type_scores.items()
+        if s >= 0.50 and t not in C.SCALPER_BLOCKED_MARKET_TYPES
+    ]
     approved.sort(key=lambda t: type_scores[t], reverse=True)
 
     best_type = approved[0] if approved else max(type_scores, key=type_scores.get, default="")

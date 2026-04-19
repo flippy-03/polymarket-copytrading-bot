@@ -43,6 +43,13 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
         r"\b(hit|reach|touch|peak at)\b.{0,40}\$[\d,k]+",
         re.I,
     ), "crypto_hit_price"),
+    # Micro-timeframe first (5/10-min windows) — must match before _short/_daily
+    # to avoid being absorbed by broader patterns. These are near-random for
+    # copy-trading: the system's latency alone destroys any edge.
+    (re.compile(
+        r"\b(up|down)\b.{0,40}\b([1-9]|1[0-4])[\s-]*(?:min(?:ute)?s?|m\b)",
+        re.I,
+    ), "crypto_updown_micro"),
     (re.compile(
         r"\b(up|down)\b.{0,20}\b(15[\s-]*min|30[\s-]*min|1[\s-]*h|4[\s-]*h)\b",
         re.I,
@@ -51,6 +58,12 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
         r"\b(up|down|higher|lower)\b.{0,40}\b(today|daily|24h|24-hour|end of day)\b",
         re.I,
     ), "crypto_updown_daily"),
+    # Generic "Up or Down" title with time window (no dollar sign)
+    # "Bitcoin Up or Down - April 19, 6:25AM-6:30AM" → crypto_updown_micro
+    (re.compile(
+        r"\b(bitcoin|btc|ethereum|eth|sol|solana)\s+up\s+or\s+down\b.*\d+(?::\d+)?\s*(?:am|pm)?\s*-\s*\d+(?::\d+)?",
+        re.I,
+    ), "crypto_updown_micro"),
 
     # ── Sports ───────────────────────────────────────────────────────────────
     (re.compile(
@@ -132,7 +145,9 @@ def classify(market: dict) -> str:
         if re.search(r"\$[\d,k]+", text):
             return "crypto_above"  # generic directional fallback
 
-    return "other"
+    # Explicit unclassified bucket so downstream code can block it without
+    # colliding with legitimate "other" markets someone might whitelist.
+    return "unclassified"
 
 
 def classify_batch(markets: list[dict]) -> dict[str, str]:
