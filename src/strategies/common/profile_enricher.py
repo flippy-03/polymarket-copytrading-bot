@@ -167,6 +167,15 @@ class ProfileEnricher:
             trades, pos_pnl, pos_open
         )
 
+        # v3.0: market-maker / negativeRisk arbitrage detection. These wallets
+        # (like "ZhangMuZhi.." at +$33k/day) operate through REDEEM+MERGE on
+        # multi-outcome markets, not directional bets. Their edge does not
+        # transfer to copy-traders — we must exclude them from the pool.
+        mm_info = _is_market_maker_heuristic(trades)
+        profile["is_market_maker"] = mm_info["is_mm"]
+        profile["mm_confidence"] = mm_info["confidence"]
+        profile["mm_signals"] = mm_info["signals"]
+
         # Bot flag is computed from raw trades (heuristic reused from specialist_profiler)
         is_bot = _is_bot_heuristic(trades) if len(trades) >= 20 else False
 
@@ -257,6 +266,93 @@ def _pnl_for_cid(
         return None
     buys = [t for t in mkt_trades if t.get("side") == "BUY"]
     return sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)
+
+
+def _is_market_maker_heuristic(trades: list[dict]) -> dict:
+    """Detect negativeRisk arbitrage / market maker wallets from trade data.
+
+    Returns {is_mm, confidence (0..1), signals {...}}.
+
+    Three independent signals — 2/3 triggered → classify as MM.
+
+    1. BUY/SELL skew: MMs exit via REDEEM/MERGE (on-chain), not via SELL.
+       A ratio > 50:1 is a very strong signal — legitimate traders close
+       positions by selling. We look at the last 180 days.
+
+    2. Price-near-edge concentration: arb bots buy near $0.99 (or near
+       $0.01 on the opposite side) on multi-outcome markets where the sum
+       of probabilities is miscalibrated. >25% of trades at price ≥ 0.95
+       OR ≤ 0.05 is uncommon for directional traders.
+
+    3. Same-event multi-outcome presence: MMs hold positions across many
+       outcomes of the same event (e.g. 5 sub-markets of a view-count
+       event). >40% of trades concentrated in events where the wallet
+       touched ≥3 outcomes signals arbitrage of multi-outcome spreads.
+    """
+    if len(trades) < 20:
+        return {"is_mm": False, "confidence": 0.0, "signals": {}}
+
+    # Signal 1: BUY/SELL ratio
+    buys = sum(1 for t in trades if (t.get("side") or "").upper() == "BUY")
+    sells = sum(1 for t in trades if (t.get("side") or "").upper() == "SELL")
+    total = buys + sells
+    if total == 0:
+        return {"is_mm": False, "confidence": 0.0, "signals": {}}
+    buy_ratio = buys / total if total else 0
+    # Trigger when almost all trades are BUY (>98%) — typical MM fingerprint.
+    signal_buy_skew = buy_ratio >= 0.98 and total >= 50
+
+    # Signal 2: price near edges (arbitrage hunting)
+    edge_trades = 0
+    for t in trades:
+        try:
+            p = float(t.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if p >= 0.95 or (0 < p <= 0.05):
+            edge_trades += 1
+    edge_ratio = edge_trades / len(trades)
+    signal_edge_concentration = edge_ratio >= 0.25
+
+    # Signal 3: same-event multi-outcome coverage
+    from collections import defaultdict as _dd
+    event_outcomes: dict = _dd(set)
+    event_trade_count: dict = _dd(int)
+    for t in trades:
+        ev = t.get("eventSlug") or ""
+        if not ev:
+            continue
+        # outcome can be "Yes"/"No" for binary, or a specific label for
+        # multi-outcome events. conditionId is the more granular handle.
+        cid = t.get("conditionId") or t.get("asset")
+        if cid:
+            event_outcomes[ev].add(cid)
+        event_trade_count[ev] += 1
+
+    multi_event_trades = sum(
+        count for ev, count in event_trade_count.items()
+        if len(event_outcomes.get(ev, set())) >= 3
+    )
+    multi_ratio = multi_event_trades / len(trades) if trades else 0
+    signal_multi_outcome = multi_ratio >= 0.40
+
+    signals = {
+        "buy_ratio": round(buy_ratio, 4),
+        "edge_price_ratio": round(edge_ratio, 4),
+        "multi_outcome_ratio": round(multi_ratio, 4),
+        "buy_skew": signal_buy_skew,
+        "edge_concentration": signal_edge_concentration,
+        "multi_outcome_presence": signal_multi_outcome,
+        "total_trades_evaluated": len(trades),
+    }
+
+    triggered = sum([signal_buy_skew, signal_edge_concentration, signal_multi_outcome])
+    is_mm = triggered >= 2
+    # Confidence scales with signals; floor at 0.33 per signal so downstream
+    # UI can surface borderline cases ("1/3 signals" = suspicious but not MM).
+    confidence = round(triggered / 3.0, 3)
+
+    return {"is_mm": is_mm, "confidence": confidence, "signals": signals}
 
 
 def _compute_last_30d_actual_wr(

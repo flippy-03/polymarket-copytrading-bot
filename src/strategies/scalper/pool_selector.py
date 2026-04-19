@@ -110,6 +110,16 @@ class ScalperPoolSelector:
             type_tcs = profile.get("type_trade_counts") or {}
             type_sharpes = profile.get("type_sharpe_ratios") or {}
 
+            # v3.0: market-maker / arbitrage bot filter. MMs have great PnL
+            # via REDEEM+MERGE across multi-outcome events, but copying a
+            # single leg exposes us to the full downside. Hard-skip.
+            if profile.get("is_market_maker"):
+                logger.warning(
+                    f"Skip {wallet[:10]}… market_maker detected "
+                    f"(confidence={profile.get('mm_confidence')})"
+                )
+                continue
+
             # v3.0: divergence gate — if the titular's best_type_hit_rate
             # differs from recent actual WR by more than the configured limit,
             # the profile metrics are stale and we skip them entirely.
