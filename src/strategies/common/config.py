@@ -109,6 +109,40 @@ SCALPER_MIN_TITULAR_PORTFOLIO_USD = 100.0
 # more than this (in percentage points). Protects against stale/inflated HR.
 SCALPER_MAX_HR_WR_DIVERGENCE = 0.20
 
+# v3.1: niche concentration soft-penalty applied to composite_score.
+# Wallets with concentration_pct >= threshold get no penalty (full score).
+# Below threshold, linear penalty scaling to PENALTY_MAX at concentration=0.
+# Example @ threshold=0.70, max=0.15:
+#   0.70 → score × 1.00 · 0.55 → × 0.968 · 0.40 → × 0.936 · 0.00 → × 0.85
+NICHE_CONCENTRATION_THRESHOLD = 0.70
+NICHE_CONCENTRATION_PENALTY_MAX = 0.15
+
+# v3.1: shadow validation gate. Every new titular spends this many days
+# with all trades forced to is_shadow=True. At the end of the window,
+# shadow_validator evaluates paper performance against thresholds:
+#   - at least MIN_SHADOW_TRADES executed
+#   - paper PnL >= PAPER_PNL_FLOOR_PCT of total simulated exposure
+#   - paper WR >= PAPER_WR_FLOOR
+# If all three hold → promote to real. Otherwise → retire.
+SHADOW_VALIDATION_DAYS = 14
+SHADOW_MIN_TRADES = 5
+SHADOW_PAPER_WR_FLOOR = 0.55
+SHADOW_PAPER_PNL_FLOOR_PCT = 0.0    # breakeven minimum
+
+# v3.1: degradation evaluator (cron every 6h) — numeric thresholds per
+# niche_specialist_engine.html §09. Runs against real closed trades in
+# the last 7 days per active titular.
+DEGRADATION_EVAL_HOURS = 6
+DEGRADATION_WINDOW_DAYS = 7
+# Layer 1 — pause on either of these
+DEGRADATION_PNL_7D_PAUSE_PCT = -0.12       # pnl_7d / capital_allocated <= -12%
+DEGRADATION_WR15_PAUSE = 0.62              # WR on last 15 < 62%
+# Layer 1b — reduce sizing to 50% (between 0.62 and 0.65 WR)
+DEGRADATION_WR15_REDUCE = 0.65
+DEGRADATION_SIZING_MULT_REDUCED = 0.5
+# Recovery — full sizing back after a clean WR streak
+DEGRADATION_RECOVERY_WR10 = 0.70
+
 # V2 rotation & cooldown
 SCALPER_HEALTH_CHECK_HOURS = 72         # hours between health checks (no forced weekly rotation)
 SCALPER_COOLDOWN_DAYS_BASE = 30         # base cooldown for removed titulars

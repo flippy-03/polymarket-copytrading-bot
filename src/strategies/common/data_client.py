@@ -85,6 +85,37 @@ class DataClient:
             time.sleep(0.1)
         return all_trades
 
+    def get_all_wallet_redeems(
+        self,
+        wallet: str,
+        start: Optional[int] = None,
+        max_pages: int = 4,
+    ) -> list[dict]:
+        """Fetch REDEEM events for a wallet. Used for PnL calc on resolved
+        markets where the trader redeemed winning shares instead of selling —
+        without these, the fallback PnL in profile_enricher misses the
+        redemption proceeds entirely.
+        """
+        all_redeems: list[dict] = []
+        offset = 0
+        for _ in range(max_pages):
+            try:
+                batch = self.get_wallet_activity(
+                    wallet, type_filter="REDEEM", start=start, limit=500, offset=offset
+                )
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 400 and offset > 0:
+                    break
+                raise
+            if not batch:
+                break
+            all_redeems.extend(batch)
+            if len(batch) < 500:
+                break
+            offset += 500
+            time.sleep(0.1)
+        return all_redeems
+
     # ── Positions ───────────────────────────────────────
 
     def get_wallet_positions(

@@ -154,6 +154,7 @@ class ScalperPoolSelector:
                     sharpe_proxy=profile.get("sharpe_proxy") or 0,
                     confidence=profile.get("profile_confidence") or "LOW",
                     is_priority=mtype in priority_types,
+                    niche_concentration=profile.get("niche_concentration_pct"),
                     min_hr=min_hr,
                     min_tc=min_tc,
                 )
@@ -227,6 +228,15 @@ class ScalperPoolSelector:
             logger.warning(f"persist_selection: retire old titulars failed: {e}")
 
         alloc_pct = round(1.0 / len(candidates), 6)
+        # v3.1: every new titular starts in shadow validation. The window
+        # end-date is set now — no trade goes real until the validator job
+        # promotes them (or retires them if they fail the gate).
+        from datetime import datetime, timedelta, timezone
+        shadow_until = (
+            datetime.now(tz=timezone.utc)
+            + timedelta(days=C.SHADOW_VALIDATION_DAYS)
+        ).isoformat()
+
         for cand in candidates:
             risk_cfg = compute_risk_config(cand.profile)
             db.upsert_scalper_pool_entry(
@@ -241,6 +251,8 @@ class ScalperPoolSelector:
                     "per_trader_is_broken": False,
                     "consecutive_wins": 0,
                     "allocation_pct": alloc_pct,
+                    "shadow_validation_until": shadow_until,
+                    "validation_outcome": "PENDING",
                 },
                 run_id=self._run_id,
             )
@@ -258,6 +270,7 @@ def _composite_score(
     sharpe_proxy: float,
     confidence: str,
     is_priority: bool,
+    niche_concentration: Optional[float] = None,
     min_hr: float = C.SCALPER_MIN_HIT_RATE,
     min_tc: int = C.SCALPER_MIN_TRADE_COUNT,
 ) -> float:
@@ -297,6 +310,19 @@ def _composite_score(
     if worst_30d_hr < 0.50:
         raw *= 0.7 + 0.3 * (worst_30d_hr / 0.50)
 
+    # v3.1: niche concentration penalty — specialists beat generalists in
+    # copy-trading because their edge in a single niche transfers cleanly.
+    # A wallet spread across many types dilutes signal. Linear penalty when
+    # concentration < threshold, capped at PENALTY_MAX.
+    # Example @ threshold=0.70, max=0.15:
+    #   concentration=0.70 → no penalty · 0.55 → raw × 0.925 · 0.40 → × 0.85
+    if niche_concentration is not None and niche_concentration < C.NICHE_CONCENTRATION_THRESHOLD:
+        shortfall = C.NICHE_CONCENTRATION_THRESHOLD - niche_concentration
+        # shortfall in [0, threshold]; normalise to [0, 1] for penalty scaling
+        normalised = min(1.0, shortfall / C.NICHE_CONCENTRATION_THRESHOLD)
+        penalty = normalised * C.NICHE_CONCENTRATION_PENALTY_MAX
+        raw *= 1.0 - penalty
+
     return round(raw, 4)
 
 
@@ -326,6 +352,7 @@ def _build_candidate(
             sharpe_proxy=profile.get("sharpe_proxy") or 0,
             confidence=profile.get("profile_confidence") or "LOW",
             is_priority=mtype in priority_types,
+            niche_concentration=profile.get("niche_concentration_pct"),
             min_hr=min_hr,
             min_tc=min_tc,
         )

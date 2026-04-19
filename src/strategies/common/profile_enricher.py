@@ -116,6 +116,15 @@ class ProfileEnricher:
             logger.debug(f"  enricher: positions fetch failed {wallet[:10]}…: {e}")
             positions = []
 
+        # v3.1: include REDEEM proceeds for the fallback PnL formula.
+        # Without these, wallets that redeem winning shares (vs selling them
+        # in the book) show null PnL in the trade-only fallback path.
+        try:
+            redeems = self._data.get_all_wallet_redeems(wallet, start=window_start)
+        except Exception as e:
+            logger.debug(f"  enricher: redeems fetch failed {wallet[:10]}…: {e}")
+            redeems = []
+
         profile: dict[str, Any] = {
             "wallet": wallet,
             "enriched_at": now_ts,
@@ -141,8 +150,18 @@ class ProfileEnricher:
         pos_pnl, pos_open, total_position_value = _resolve_positions(positions)
         profile["positions_analyzed"] = len(pos_pnl)
 
+        # v3.1: aggregate REDEEM proceeds per conditionId for the fallback
+        # PnL path. Data-api returns one row per redemption event; sum usdc.
+        redeem_proceeds_by_cid: dict[str, float] = defaultdict(float)
+        for r in redeems:
+            cid = r.get("conditionId")
+            if cid:
+                redeem_proceeds_by_cid[cid] += _usdc(r)
+
         # Block 1 — Coverage by universe / market type
-        coverage_kpis = _compute_coverage_kpis(trades, pos_pnl, pos_open)
+        coverage_kpis = _compute_coverage_kpis(
+            trades, pos_pnl, pos_open, redeem_proceeds_by_cid
+        )
         profile.update(coverage_kpis)
 
         # Block 3 — Exit management (proxy only in MVP)
@@ -151,7 +170,9 @@ class ProfileEnricher:
         )
 
         # Block 4 — Sizing & conviction
-        sizing_kpis = _compute_sizing_kpis(trades, pos_pnl, pos_open)
+        sizing_kpis = _compute_sizing_kpis(
+            trades, pos_pnl, pos_open, redeem_proceeds_by_cid
+        )
         profile.update(sizing_kpis)
 
         # Block 5 — Portfolio (partial)
@@ -164,7 +185,7 @@ class ProfileEnricher:
         # the aggregate type_hit_rates diverges from recent real performance.
         # We compute this separately from type_hit_rates (which spans 120d).
         profile["last_30d_actual_wr"] = _compute_last_30d_actual_wr(
-            trades, pos_pnl, pos_open
+            trades, pos_pnl, pos_open, redeem_proceeds_by_cid
         )
 
         # v3.0: market-maker / negativeRisk arbitrage detection. These wallets
@@ -237,17 +258,27 @@ def _infer_win(
     mkt_trades: list[dict],
     pos_pnl: dict[str, float],
     pos_open: set[str],
+    redeem_proceeds: Optional[dict[str, float]] = None,
 ) -> Optional[bool]:
-    """Return True/False for resolved markets, None if open/indeterminate."""
+    """Return True/False for resolved markets, None if open/indeterminate.
+
+    v3.1: falls back on REDEEM events when the market resolved by redemption
+    (common in multi-outcome markets where winning shares are redeemed at
+    $1 each rather than sold back to the book).
+    """
     if cid in pos_open:
         return None
     if cid in pos_pnl:
         return pos_pnl[cid] > 0
+    redeem_proceeds = redeem_proceeds or {}
     sells = [t for t in mkt_trades if t.get("side") == "SELL"]
     buys = [t for t in mkt_trades if t.get("side") == "BUY"]
-    if not sells:
+    redeem_usdc = redeem_proceeds.get(cid, 0.0)
+    if not sells and not redeem_usdc:
         return None
-    return (sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)) > 0
+    buy_cost = sum(_usdc(t) for t in buys)
+    sell_proceeds = sum(_usdc(t) for t in sells)
+    return (sell_proceeds + redeem_usdc - buy_cost) > 0
 
 
 def _pnl_for_cid(
@@ -255,17 +286,30 @@ def _pnl_for_cid(
     mkt_trades: list[dict],
     pos_pnl: dict[str, float],
     pos_open: set[str],
+    redeem_proceeds: Optional[dict[str, float]] = None,
 ) -> Optional[float]:
-    """Estimated USDC P&L for a resolved market. None if open."""
+    """Estimated USDC P&L for a resolved market. None if open.
+
+    Formula (per niche_specialist_engine.html §12):
+        position_pnl = Σsell_proceeds + Σredeem_proceeds − Σbuy_costs
+                       + unrealized_value (only for open positions)
+
+    SPLIT/MERGE operations are explicitly NOT in the formula — they're
+    neutral collateral conversions. The data-api activity fetch already
+    filters to type=TRADE | REDEEM, so this function only sees the right
+    events.
+    """
     if cid in pos_open:
         return None
     if cid in pos_pnl:
         return pos_pnl[cid]
+    redeem_proceeds = redeem_proceeds or {}
     sells = [t for t in mkt_trades if t.get("side") == "SELL"]
-    if not sells:
+    redeem_usdc = redeem_proceeds.get(cid, 0.0)
+    if not sells and not redeem_usdc:
         return None
     buys = [t for t in mkt_trades if t.get("side") == "BUY"]
-    return sum(_usdc(t) for t in sells) - sum(_usdc(t) for t in buys)
+    return sum(_usdc(t) for t in sells) + redeem_usdc - sum(_usdc(t) for t in buys)
 
 
 def _is_market_maker_heuristic(trades: list[dict]) -> dict:
@@ -359,6 +403,7 @@ def _compute_last_30d_actual_wr(
     trades: list[dict],
     pos_pnl: dict[str, float],
     pos_open: set[str],
+    redeem_proceeds: Optional[dict[str, float]] = None,
 ) -> Optional[float]:
     """Last-30d actual win rate over cashPnl-resolved trades only.
 
@@ -366,30 +411,38 @@ def _compute_last_30d_actual_wr(
     detect when a titular's historical HR is no longer representative of
     current performance (the 57pp gap we saw in v2.1 run).
 
+    v3.1: fall back on REDEEM-inferred wins when cashPnl is missing but
+    the wallet redeemed shares (common for resolved markets).
+
     Returns None if fewer than 5 resolved trades in the window (not enough
     statistical signal to block anyone).
     """
     import time as _time
     cutoff = int(_time.time()) - 30 * 86400
+    redeem_proceeds = redeem_proceeds or {}
 
     by_cid = _group_trades_by_cid(trades)
     wins = 0
     resolved = 0
     for cid, mkt_trades in by_cid.items():
-        # Only trades where the most recent action is within 30d
         latest_ts = max(
             int(t.get("timestamp") or t.get("createdAt") or 0) for t in mkt_trades
         )
         if latest_ts < cutoff:
             continue
-        # Prefer cashPnl-confirmed outcomes (authoritative). Skip open or
-        # indeterminate — we want true WR, not a speculative count.
         if cid in pos_open:
             continue
-        if cid not in pos_pnl:
+        if cid in pos_pnl:
+            resolved += 1
+            if pos_pnl[cid] > 0:
+                wins += 1
+            continue
+        # Fallback via trades + REDEEMs
+        win = _infer_win(cid, mkt_trades, pos_pnl, pos_open, redeem_proceeds)
+        if win is None:
             continue
         resolved += 1
-        if pos_pnl[cid] > 0:
+        if win:
             wins += 1
 
     if resolved < 5:
@@ -401,8 +454,10 @@ def _compute_coverage_kpis(
     trades: list[dict],
     pos_pnl: dict[str, float],
     pos_open: set[str],
+    redeem_proceeds: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
     """Bloque 1 — coverage by universe and market type."""
+    redeem_proceeds = redeem_proceeds or {}
     by_cid = _group_trades_by_cid(trades)
 
     # Per-market_type aggregations
@@ -417,6 +472,17 @@ def _compute_coverage_kpis(
         first = mkt_trades[0]
         mtype = classify(first)
 
+        # v3.1: if regex classifier says 'unclassified', try Gamma tags as
+        # a cache-backed fallback. Offline-safe; caches forever in DB.
+        if mtype == "unclassified":
+            try:
+                from src.data.gamma_tags_client import classify_via_tags
+                tag_niche = classify_via_tags(first)
+                if tag_niche:
+                    mtype = tag_niche
+            except Exception:
+                pass
+
         # Hold time: first BUY → last SELL (measures actual position duration)
         sorted_t = sorted(
             mkt_trades,
@@ -430,7 +496,7 @@ def _compute_coverage_kpis(
             if 0 < first_ts < last_ts:
                 type_hold_minutes[mtype].append((last_ts - first_ts) / 60.0)
 
-        win = _infer_win(cid, mkt_trades, pos_pnl, pos_open)
+        win = _infer_win(cid, mkt_trades, pos_pnl, pos_open, redeem_proceeds)
         if win is None:
             continue
         type_trades[mtype] += 1
@@ -439,7 +505,7 @@ def _compute_coverage_kpis(
         if cid in pos_pnl:  # outcome confirmed by /positions cashPnl (authoritative)
             type_cashpnl_n[mtype] += 1
 
-        pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open)
+        pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open, redeem_proceeds)
         if pnl is None:
             continue
         if pnl >= 0:
@@ -556,7 +622,7 @@ def _compute_coverage_kpis(
     for cid, mkt_trades in by_cid.items():
         first = mkt_trades[0]
         mtype = classify(first)
-        pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open)
+        pnl = _pnl_for_cid(cid, mkt_trades, pos_pnl, pos_open, redeem_proceeds)
         if pnl is None:
             continue
         # Determine the day from the first trade in this market
@@ -597,6 +663,16 @@ def _compute_coverage_kpis(
         round(total_confirmed / total_resolved, 4) if total_resolved > 0 else None
     )
 
+    # v3.1: niche_concentration_pct — fraction of resolved trades in the
+    # single best type. Specialists concentrate their activity; generalists
+    # spread thin. Used as a soft penalty in pool_selector composite_score:
+    # values <0.70 get progressively penalised. Range [0, 1].
+    if total_resolved > 0 and type_trades:
+        top_type_count = max(type_trades.values())
+        niche_concentration = round(top_type_count / total_resolved, 4)
+    else:
+        niche_concentration = None
+
     return {
         "primary_universe": primary_universe,
         "active_universes": sorted(active_universes),
@@ -616,6 +692,7 @@ def _compute_coverage_kpis(
         "avg_hold_time_minutes": avg_hold_time_minutes,
         "type_avg_hold_minutes": type_avg_hold_minutes,
         "hr_cashpnl_confirmed_pct": hr_cashpnl_confirmed_pct,
+        "niche_concentration_pct": niche_concentration,
     }
 
 
@@ -639,8 +716,10 @@ def _compute_sizing_kpis(
     trades: list[dict],
     pos_pnl: dict[str, float],
     pos_open: set[str],
+    redeem_proceeds: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
     """Bloque 4 — sizing & conviction."""
+    redeem_proceeds = redeem_proceeds or {}
     # Per-market total BUY size (one "position" = sum of BUYs in that conditionId)
     by_cid = _group_trades_by_cid(trades)
     sizes: list[float] = []
@@ -656,7 +735,7 @@ def _compute_sizing_kpis(
             continue
         sizes.append(pos_size)
 
-        win = _infer_win(cid, mkt_trades, pos_pnl, pos_open)
+        win = _infer_win(cid, mkt_trades, pos_pnl, pos_open, redeem_proceeds)
         if win is True:
             sizes_winners.append(pos_size)
         elif win is False:

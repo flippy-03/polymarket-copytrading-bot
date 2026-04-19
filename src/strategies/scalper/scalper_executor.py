@@ -109,6 +109,42 @@ class ScalperExecutor:
             logger.debug(f"_get_approved_types({titular[:10]}): {e}")
         return None
 
+    def _is_in_shadow_window(self, titular: str) -> bool:
+        """True if titular is still inside the shadow validation window.
+
+        The shadow_validator job promotes/retires when the window expires;
+        until then, this method keeps all trades as is_shadow=True.
+        """
+        try:
+            client = _db.get_client()
+            row = (
+                client.table("scalper_pool")
+                .select("shadow_validation_until,validation_outcome")
+                .eq("run_id", self.run_id)
+                .eq("wallet_address", titular)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if not row:
+                return False
+            r = row[0] or {}
+            until = r.get("shadow_validation_until")
+            outcome = r.get("validation_outcome")
+            if outcome == "PROMOTED":
+                return False
+            if outcome == "REJECTED":
+                # Still in shadow/retired — skipping is caller's job
+                return True
+            if not until:
+                return False
+            from datetime import datetime, timezone
+            deadline = datetime.fromisoformat(until.replace("Z", "+00:00"))
+            return datetime.now(tz=timezone.utc) < deadline
+        except Exception as e:
+            logger.debug(f"_is_in_shadow_window({titular[:10]}): {e}")
+            return False
+
     # ── open ─────────────────────────────────────────────
 
     def mirror_open(
@@ -152,6 +188,12 @@ class ScalperExecutor:
         if approved is not None and market_type not in approved:
             force_shadow = True
             shadow_reason = shadow_reason or f"type_not_approved:{market_type}"
+
+        # v3.1: shadow validation gate — new titulars spend N days shadow-only.
+        # Until the validator job promotes them, every trade is paper.
+        if self._is_in_shadow_window(titular):
+            force_shadow = True
+            shadow_reason = shadow_reason or "shadow_validation_window"
 
         # Compute portfolio-relative size
         size_usd = self._sizer.compute_trade_size(titular)
