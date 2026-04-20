@@ -296,6 +296,7 @@ class ScalperExecutor:
             market_question=trade.get("title") or trade.get("question"),
             market_category=market_type,
             metadata=metadata,
+            force_shadow=force_shadow,
         )
 
     # ── close ────────────────────────────────────────────

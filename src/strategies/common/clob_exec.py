@@ -151,11 +151,18 @@ def open_paper_trade(
     market_question: str | None = None,
     market_category: str | None = None,
     metadata: dict | None = None,
+    force_shadow: bool = False,
 ) -> dict:
     """
     Try to open a real trade (subject to risk gating) and ALWAYS open a shadow
     trade in parallel (fixed $100, no risk gating). Returns:
         {"real": trade_id | None, "shadow": trade_id | None, "price": float | None}
+
+    `force_shadow` (v3.1): when the caller already decided this trade must not
+    open as real — e.g. titular is broken, event already copied, type filtered,
+    shadow validation window active — we skip the real branch entirely. Only
+    the global risk check (can_open_position) isn't aware of per-titular state;
+    this parameter is the mechanism the caller uses to propagate that decision.
     """
     price = get_token_price(outcome_token_id)
     if not price or price <= 0:
@@ -165,9 +172,13 @@ def open_paper_trade(
 
     out: dict = {"real": None, "shadow": None, "price": price}
 
-    ok, reason = risk.can_open_position(strategy, run_id=run_id)
+    if force_shadow:
+        ok = False
+        reason = "force_shadow"
+    else:
+        ok, reason = risk.can_open_position(strategy, run_id=run_id)
     if not ok:
-        logger.info(f"[{strategy}] risk blocked real: {reason}")
+        logger.info(f"[{strategy}] real skipped: {reason}")
     else:
         real_id = _open_row(
             run_id=run_id, strategy=strategy,
