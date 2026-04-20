@@ -173,6 +173,18 @@ class ScalperExecutor:
         direction = "YES" if outcome.lower().startswith("y") else "NO"
         market_type = classify(trade)
 
+        # v3.1: event-level dedup. Polymarket data-api trade activity exposes
+        # eventSlug directly at the top level. An event can contain multiple
+        # markets (money-line, O/U, spread) — copying 2 titulars who bet the
+        # same side of the same event duplicates correlated exposure for zero
+        # diversification benefit. Bug detected in v3.0 Magic vs Pistons
+        # (−$75 on 2 duplicated trades).
+        event_slug = trade.get("eventSlug") or trade.get("event_slug")
+        if not event_slug:
+            evs = trade.get("events") or []
+            if isinstance(evs, list) and evs and isinstance(evs[0], dict):
+                event_slug = evs[0].get("slug")
+
         # v3.0: hard-block market types known to destroy edge in copy-trading
         # (micro-timeframe crypto, unclassified). Force shadow so we still
         # observe the decision but don't risk real capital.
@@ -207,7 +219,7 @@ class ScalperExecutor:
             # Use a nominal size for shadow trades
             size_usd = 50.0
 
-        # Dedupe: skip if already OPEN real trade for same (titular, asset)
+        # Dedupe layer 1: skip if already OPEN real trade for same (titular, asset)
         if not force_shadow:
             client = _db.get_client()
             existing = (
@@ -226,6 +238,32 @@ class ScalperExecutor:
             if existing:
                 return None
 
+        # v3.1 Dedupe layer 2: event-level correlation check. If ANOTHER
+        # titular already has an OPEN real trade on the same event and the
+        # same direction, downgrade this one to shadow. Keeps the observation
+        # (shadow trade gets opened) but removes the duplicate real exposure.
+        # Two titulars disagreeing (YES vs NO) are allowed — they hedge.
+        if not force_shadow and event_slug:
+            existing_event = (
+                client.table("copy_trades")
+                .select("id,source_wallet,metadata,direction")
+                .eq("run_id", self.run_id)
+                .eq("strategy", self.STRATEGY)
+                .eq("status", "OPEN")
+                .eq("is_shadow", False)
+                .eq("direction", direction)
+                .execute()
+                .data
+            ) or []
+            for other in existing_event:
+                other_meta = other.get("metadata") or {}
+                if other_meta.get("event_slug") == event_slug:
+                    force_shadow = True
+                    shadow_reason = shadow_reason or (
+                        f"event_already_copied:{event_slug[:30]}"
+                    )
+                    break
+
         # Enrich metadata with titular-level KPIs so dashboard can show
         # Avg HR, EV, composite score per trade without joins.
         stats = self._get_titular_stats(titular, market_type)
@@ -235,6 +273,7 @@ class ScalperExecutor:
             "titular_usdc": _usdc(trade),
             "titular_price": float(trade.get("price") or 0),
             "market_type": market_type,
+            "event_slug": event_slug,    # v3.1 — for cross-titular event dedup
             "avg_hit_rate": stats.get("avg_hit_rate"),
             "composite_score": stats.get("composite_score"),
             "closes_at": (
