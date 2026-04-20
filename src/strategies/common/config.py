@@ -224,7 +224,12 @@ SPECIALIST_MAX_EXPOSURE_PCT = 0.50  # Max total open exposure as % of portfolio
 # Trailing stop (spec §10)
 TS_ACTIVATION = 0.08                # Activate trailing after +8% gain
 TS_TRAIL_PCT = 0.15                 # Trail 15% below high-water mark
-TS_HARD_STOP = -0.20                # Hard stop at -20%
+TS_HARD_STOP = -0.20                # Hard stop at -20% (default)
+# v3.1: sports markets are noisier near resolution — a 78% favourite can
+# evaporate in the final minutes without implying a model error. Allow
+# wider hard stop for sports so we don't get shaken out of valid bets on
+# close games. Non-sports (crypto, financial, politics) keep the -20%.
+SPORTS_HARD_STOP_PCT = -0.40
 
 # Routing
 HYBRID_BD_ONLY_MIN_KNOWN = 3        # Use DB-only when >=3 known specialists

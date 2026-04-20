@@ -23,6 +23,21 @@ RESOLUTION_CHECK_EVERY = 5
 TRAILING_ACTIVATION = C.TS_ACTIVATION   # +8% gain
 TRAILING_TRAIL_PCT = C.TS_TRAIL_PCT     # 15% below HWM
 
+# v3.1 hard-stop rules: applied only while trailing is NOT active (trailing
+# takes over once the trade has cleared +8%). Sports get a wider stop
+# because late-game volatility is noise, not model error.
+_SPORTS_TYPES = frozenset({
+    "sports_winner", "sports_spread", "sports_total", "sports_futures",
+})
+
+
+def _hard_stop_for(market_category: str | None) -> float:
+    """Return the hard-stop threshold (negative float) to apply to a trade
+    of the given market_category."""
+    if market_category in _SPORTS_TYPES:
+        return C.SPORTS_HARD_STOP_PCT
+    return C.TS_HARD_STOP
+
 
 class ScalperCopyMonitor:
     STRATEGY = "SCALPER"
@@ -159,12 +174,30 @@ class ScalperCopyMonitor:
                 )
                 trailing_active = True
 
-            # Trailing stop check
+            # Trailing stop (active) OR hard stop (trailing not yet active).
+            # Option B from the v3.1 postmortem: hard-stop covers trades that
+            # only moved in one direction (never earned the +8% that unlocks
+            # the trailing logic). Threshold differs by market_category —
+            # sports get −40%, rest get −20%.
             if trailing_active:
                 trail_stop = high_water * (1 - TRAILING_TRAIL_PCT)
                 if current_price <= trail_stop:
                     clob_exec.close_paper_trade(trade_id, "TRAILING_STOP")
                     closed += 1
+            else:
+                # market_type lives in metadata (scalper_executor writes it
+                # there); market_category column is optional. Metadata is
+                # the reliable source.
+                market_type = metadata.get("market_type")
+                hard_stop = _hard_stop_for(market_type)
+                if pct_change <= hard_stop:
+                    clob_exec.close_paper_trade(trade_id, "STOP_LOSS")
+                    closed += 1
+                    logger.info(
+                        f"  STOP_LOSS {trade_id[:8]}… "
+                        f"pct={pct_change:+.1%} threshold={hard_stop:+.0%} "
+                        f"type={market_type}"
+                    )
 
         return closed
 
