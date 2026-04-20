@@ -6,8 +6,25 @@ import { useState, useEffect, useCallback, useRef } from "react";
  * Module-level cache keyed by `cacheKey`. Persists across unmounts of a
  * single browser session so switching strategies shows last-known data
  * instantly while the new fetch completes in background.
+ *
+ * Entries carry a timestamp and are considered stale after CACHE_TTL_MS.
+ * Stale entries are still returned immediately (UI stays responsive) but
+ * a fresh fetch is kicked off right away so the user sees current state
+ * within one poll cycle.
  */
-const refreshCache = new Map<string, unknown>();
+const CACHE_TTL_MS = 60_000;
+type CacheEntry<T> = { value: T; at: number };
+const refreshCache = new Map<string, CacheEntry<unknown>>();
+
+function _cacheGet<T>(key: string): { value: T; stale: boolean } | null {
+  const entry = refreshCache.get(key) as CacheEntry<T> | undefined;
+  if (!entry) return null;
+  return { value: entry.value, stale: Date.now() - entry.at > CACHE_TTL_MS };
+}
+
+function _cacheSet<T>(key: string, value: T): void {
+  refreshCache.set(key, { value, at: Date.now() });
+}
 
 /**
  * Populate the auto-refresh cache without mounting a component. Used by the
@@ -18,10 +35,11 @@ const refreshCache = new Map<string, unknown>();
  * Cache keys must match those used by `useAutoRefresh(fetcher, interval, cacheKey)`.
  */
 export function prefetchIntoCache<T>(cacheKey: string, fetcher: () => Promise<T>): void {
-  if (refreshCache.has(cacheKey)) return; // already warm
+  const existing = _cacheGet<T>(cacheKey);
+  if (existing && !existing.stale) return; // already fresh
   fetcher()
     .then((result) => {
-      refreshCache.set(cacheKey, result);
+      _cacheSet(cacheKey, result);
     })
     .catch(() => {
       // Swallow — the next real mount of useAutoRefresh will retry.
@@ -42,7 +60,7 @@ export function useAutoRefresh<T>(
   intervalMs: number = 60000,
   cacheKey?: string,
 ) {
-  const initial = cacheKey ? (refreshCache.get(cacheKey) as T | undefined) ?? null : null;
+  const initial = cacheKey ? _cacheGet<T>(cacheKey)?.value ?? null : null;
   const [data, setData] = useState<T | null>(initial);
   const [loading, setLoading] = useState(initial === null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -57,7 +75,7 @@ export function useAutoRefresh<T>(
       setData(result);
       setLastUpdated(new Date());
       const key = cacheKeyRef.current;
-      if (key) refreshCache.set(key, result);
+      if (key) _cacheSet(key, result);
     } catch (err) {
       console.error("Fetch error:", err);
     } finally {
@@ -67,15 +85,19 @@ export function useAutoRefresh<T>(
 
   // When the cacheKey changes (user switches strategy/runId), hydrate `data`
   // with the cached value for the new key — keeps the UI responsive while
-  // the background refetch fires.
+  // the background refetch fires. If the cached entry is stale, we still
+  // surface it for instant feedback but kick an immediate refresh.
   useEffect(() => {
     if (!cacheKey) return;
-    const cached = refreshCache.get(cacheKey) as T | undefined;
-    if (cached !== undefined) {
-      setData(cached);
+    const cached = _cacheGet<T>(cacheKey);
+    if (cached !== null) {
+      setData(cached.value);
       setLoading(false);
+      if (cached.stale) {
+        refresh();
+      }
     }
-  }, [cacheKey]);
+  }, [cacheKey, refresh]);
 
   useEffect(() => {
     let id: ReturnType<typeof setInterval> | null = null;
