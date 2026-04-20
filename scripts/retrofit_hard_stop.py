@@ -1,26 +1,31 @@
 """Retroactively apply the missing hard stop rule to SCALPER real trades.
 
-The copy_monitor never enforced TS_HARD_STOP (-0.20). As a result, trades
-whose price crossed -20% without the trailing stop being active first were
-held until MARKET_RESOLVED — often at 100% loss. To leave cleaner data
-for the weekly backtest, we retrofit any closed real trade that met two
-conditions:
+The copy_monitor never enforced TS_HARD_STOP. Trades whose price crossed
+the threshold without the trailing stop being active first were held
+until MARKET_RESOLVED — often at 100% loss. To leave cleaner data for
+the weekly backtest, retrofit any closed real trade that met:
 
-  1. Its recorded pnl_pct is worse than HARD_STOP (-0.20).
-  2. At some moment between opened_at and closed_at we have a
-     market_price_snapshot where price <= entry_price * 0.80.
+  1. pnl_pct is worse than the category-aware hard stop, OR is exactly
+     a previous retrofit value that no longer matches the current rule
+     (e.g. previously retrofitted to -20% but the trade is sports and
+     should now be -40%).
+  2. There is a market_price_snapshot between opened_at and closed_at
+     where price crossed the threshold.
 
-For qualifying trades we set:
-  exit_price   = entry_price * 0.80              (ideal SL execution)
-  pnl_pct      = -0.20 (exactly)
-  pnl_usd      = position_usd * -0.20
+Category-aware thresholds (mirror src/strategies/scalper/copy_monitor.py):
+  sports_winner / sports_spread / sports_total / sports_futures → -40%
+  anything else (crypto_above, financial_*, unclassified, None) → -20%
+
+For qualifying trades:
+  exit_price   = entry_price * (1 + hard_stop_pct)
+  pnl_pct      = hard_stop_pct (exactly)
+  pnl_usd      = position_usd * hard_stop_pct
   closed_at    = timestamp of the first snapshot that crossed the threshold
-  close_reason = "STOP_LOSS_RETROFIT"   (distinguishes from original SL hits)
+  close_reason = "STOP_LOSS_RETROFIT"
 
-Shadows are left untouched — they already had the right SL logic. Only
-real SCALPER trades in the current v3.0 run are considered.
+Shadows are untouched (their SL logic was correct).
 
-The script runs in DRY-RUN mode by default; pass --apply to commit.
+DRY-RUN by default; pass --apply to commit.
 """
 import argparse
 import sys
@@ -34,7 +39,25 @@ from src.db import supabase_client as _db
 
 
 RUN_SCALPER = "b4a40e7d-50ec-476f-9765-e4fbab02608e"
-HARD_STOP_PCT = -0.20
+
+_SPORTS_TYPES = frozenset({
+    "sports_winner", "sports_spread", "sports_total", "sports_futures",
+})
+SPORTS_HARD_STOP_PCT = -0.40
+DEFAULT_HARD_STOP_PCT = -0.20
+
+
+def hard_stop_for(market_type: str | None) -> float:
+    if market_type in _SPORTS_TYPES:
+        return SPORTS_HARD_STOP_PCT
+    return DEFAULT_HARD_STOP_PCT
+
+
+def trade_market_type(t: dict) -> str | None:
+    """Prefer metadata.market_type (set by scalper_executor); fall back to
+    the column market_category."""
+    md = t.get("metadata") or {}
+    return md.get("market_type") or t.get("market_category")
 
 
 def load_candidates(client):
@@ -42,7 +65,7 @@ def load_candidates(client):
         client.table("copy_trades")
         .select("id,source_wallet,market_question,outcome_token_id,entry_price,"
                 "exit_price,position_usd,shares,pnl_usd,pnl_pct,"
-                "opened_at,closed_at,close_reason")
+                "opened_at,closed_at,close_reason,market_category,metadata")
         .eq("run_id", RUN_SCALPER)
         .eq("strategy", "SCALPER")
         .eq("is_shadow", False)
@@ -53,21 +76,27 @@ def load_candidates(client):
 
 
 def first_threshold_crossing(client, token_id: str, entry: float,
-                              opened_at: str, closed_at: str):
+                              opened_at: str, closed_at: str | None,
+                              hard_stop_pct: float):
     """Return (snapshot_at, price) of the first snapshot where
-    price <= entry * 0.80 within the window, or None."""
-    threshold = round(entry * 0.80, 6)
-    snaps = (
+    price <= entry * (1 + hard_stop_pct) within the window, or None.
+
+    closed_at can be None to search up to the latest snapshot — useful
+    when a previous retrofit shortened the closed_at window and we now
+    want to apply a stricter threshold that may have been crossed later.
+    """
+    threshold = round(entry * (1 + hard_stop_pct), 6)
+    q = (
         client.table("market_price_snapshots")
         .select("snapshot_at,price")
         .eq("outcome_token_id", token_id)
         .gte("snapshot_at", opened_at)
-        .lte("snapshot_at", closed_at)
         .order("snapshot_at")
         .limit(5000)
-        .execute()
-        .data
-    ) or []
+    )
+    if closed_at is not None:
+        q = q.lte("snapshot_at", closed_at)
+    snaps = q.execute().data or []
     for s in snaps:
         if float(s["price"]) <= threshold:
             return s["snapshot_at"], float(s["price"])
@@ -88,31 +117,52 @@ def main() -> None:
     unchanged = []
     for t in trades:
         pnl_pct = float(t.get("pnl_pct") or 0)
-        if pnl_pct >= HARD_STOP_PCT:
-            unchanged.append(t)
-            continue
         entry = float(t["entry_price"] or 0)
         if entry <= 0:
             unchanged.append(t)
             continue
 
+        mtype = trade_market_type(t)
+        ideal_pct = hard_stop_for(mtype)
+        reason = t.get("close_reason") or ""
+        is_prev_retrofit = reason == "STOP_LOSS_RETROFIT"
+
+        # Skip cases:
+        # (a) trade closed naturally above the ideal threshold (winners,
+        #     small losses, organic SLs that were milder than the rule).
+        # (b) trade is already at the right ideal (matches within tolerance).
+        # Re-retrofit when a previous retrofit set a threshold that no
+        # longer matches today's category-aware rule (e.g. -20% on sports
+        # that should now be -40%).
+        already_correct = abs(pnl_pct - ideal_pct) < 1e-3
+        if already_correct:
+            unchanged.append(t)
+            continue
+        if not is_prev_retrofit and pnl_pct >= ideal_pct - 1e-3:
+            unchanged.append(t)
+            continue
+
+        # For previous-retrofit trades, drop the upper bound so we can
+        # find a crossing past the artificially-shortened closed_at.
+        upper = None if is_prev_retrofit else t["closed_at"]
         crossing = first_threshold_crossing(
             client, t["outcome_token_id"], entry,
-            t["opened_at"], t["closed_at"],
+            t["opened_at"], upper, ideal_pct,
         )
         if not crossing:
             unchanged.append(t)
             continue
 
         cross_ts, cross_price = crossing
-        ideal_exit = round(entry * 0.80, 4)
-        new_pnl_pct = HARD_STOP_PCT
-        new_pnl_usd = round(float(t["position_usd"]) * HARD_STOP_PCT, 2)
+        ideal_exit = round(entry * (1 + ideal_pct), 4)
+        new_pnl_usd = round(float(t["position_usd"]) * ideal_pct, 2)
 
         to_fix.append({
             "id": t["id"],
             "market": (t.get("market_question") or "")[:45],
             "wallet": t["source_wallet"][:10] if t.get("source_wallet") else "—",
+            "market_type": mtype or "—",
+            "ideal_pct": ideal_pct,
             "entry": entry,
             "original_exit": float(t.get("exit_price") or 0),
             "original_pnl": float(t.get("pnl_usd") or 0),
@@ -121,7 +171,7 @@ def main() -> None:
             "crossing_price": cross_price,
             "new_exit": ideal_exit,
             "new_pnl_usd": new_pnl_usd,
-            "new_pnl_pct": new_pnl_pct,
+            "new_pnl_pct": ideal_pct,
         })
 
     print(f"\n  Trades to retrofit: {len(to_fix)}")
@@ -136,7 +186,8 @@ def main() -> None:
     for r in to_fix:
         delta = r["new_pnl_usd"] - r["original_pnl"]
         delta_total += delta
-        print(f"\n  {r['id'][:8]} | {r['market']:<45} | wallet={r['wallet']}..")
+        print(f"\n  {r['id'][:8]} | {r['market']:<45} | wallet={r['wallet']}.. "
+              f"type={r['market_type']} ideal={r['ideal_pct']:+.0%}")
         print(f"    entry=${r['entry']:.3f}  original_exit=${r['original_exit']:.3f}  "
               f"→ new_exit=${r['new_exit']:.3f}")
         print(f"    original PnL=${r['original_pnl']:+.2f} ({r['original_reason']}) "
