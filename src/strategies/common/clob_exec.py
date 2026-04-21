@@ -41,6 +41,75 @@ def get_token_price(token_id: str) -> float | None:
         return None
 
 
+def get_token_price_via_gamma(condition_id: str, token_id: str) -> float | None:
+    """Fallback price lookup via Gamma /markets when the CLOB is dry.
+
+    During late-game sports or near-resolution markets, the CLOB orderbook
+    sometimes stops returning prices (no liquidity on either side). Gamma's
+    `outcomePrices` preserves the last-observed trade price and survives
+    these lulls, so we fall back here when the primary CLOB call fails.
+    This addresses the 84-92 min sample gaps that killed Timberwolves NO
+    (-79%) and Cavaliers Spread (-67%) on 2026-04-20/21.
+
+    Returns None if Gamma is unreachable or the token isn't found in the
+    market's clobTokenIds.
+    """
+    try:
+        r = httpx.get(
+            f"{C.GAMMA_API}/markets",
+            params={"condition_ids": condition_id},
+            timeout=5.0,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        markets = data if isinstance(data, list) else [data]
+        if not markets:
+            return None
+        m = markets[0]
+        raw_ids = m.get("clobTokenIds") or []
+        if isinstance(raw_ids, str):
+            raw_ids = json.loads(raw_ids)
+        raw_prices = m.get("outcomePrices") or []
+        if isinstance(raw_prices, str):
+            raw_prices = json.loads(raw_prices)
+        if not isinstance(raw_ids, list) or not isinstance(raw_prices, list):
+            return None
+        for i, tid in enumerate(raw_ids):
+            if str(tid) == str(token_id):
+                try:
+                    p = float(raw_prices[i])
+                except (TypeError, ValueError, IndexError):
+                    return None
+                return p if 0.0 < p <= 1.0 else None
+        return None
+    except Exception as e:
+        logger.debug(f"gamma fallback price failed {condition_id[:10]}: {e}")
+        return None
+
+
+def get_token_price_resilient(
+    token_id: str, condition_id: str | None = None,
+) -> float | None:
+    """CLOB price with Gamma fallback when the orderbook is dry.
+
+    If condition_id is None, behaves exactly like get_token_price.
+    """
+    price = get_token_price(token_id)
+    if price is not None and price > 0:
+        return price
+    if not condition_id:
+        return None
+    fb = get_token_price_via_gamma(condition_id, token_id)
+    if fb is not None and fb > 0:
+        logger.info(
+            f"price via Gamma fallback token={token_id[:8]} "
+            f"cid={condition_id[:10]} = {fb:.3f}"
+        )
+        return fb
+    return None
+
+
 def get_spread(token_id: str) -> tuple[float | None, float | None]:
     """Return (ask, bid) for a token from the CLOB.
 

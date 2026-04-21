@@ -150,7 +150,10 @@ class ScalperCopyMonitor:
             if entry_price <= 0 or not token_id:
                 continue
 
-            current_price = clob_exec.get_token_price(token_id)
+            # v3.1: resilient price — fallback to Gamma outcomePrices when
+            # the CLOB orderbook is dry (typical near game resolution).
+            cid = trade.get("market_polymarket_id")
+            current_price = clob_exec.get_token_price_resilient(token_id, cid)
             if not current_price or current_price <= 0:
                 continue
 

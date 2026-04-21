@@ -108,7 +108,10 @@ class PositionManager:
         # Rely instead on: (1) trailing stop to protect accumulated gains,
         # (2) natural market resolution as the primary exit.
         # Revisit once we have ≥30 closed positions to assess P&L distribution.
-        current_price = clob_exec.get_token_price(token_id)
+        # v3.1: resilient price with Gamma fallback — avoids 80+ min sample
+        # gaps when the CLOB orderbook dries up near game resolution. The
+        # fallback uses Gamma's outcomePrices which survives liquidity lulls.
+        current_price = clob_exec.get_token_price_resilient(token_id, cid)
         if not current_price or current_price <= 0:
             return None
 
