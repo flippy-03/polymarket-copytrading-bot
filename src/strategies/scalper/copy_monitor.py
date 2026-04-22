@@ -30,6 +30,11 @@ _SPORTS_TYPES = frozenset({
     "sports_winner", "sports_spread", "sports_total", "sports_futures",
 })
 
+# Throttle for _record_price inside the trailing-stop loop. See
+# position_manager.py for the same rationale. 3 min keeps visibility of
+# the price trajectory without flooding the DB.
+_PRICE_SNAPSHOT_MIN_INTERVAL_S = 180
+
 
 def _hard_stop_for(market_category: str | None) -> float:
     """Return the hard-stop threshold (negative float) to apply to a trade
@@ -49,6 +54,8 @@ class ScalperCopyMonitor:
         self.titulars: dict[str, dict] = {}  # wallet → pool entry (with approved_market_types)
         self.last_seen: dict[str, int] = {}
         self._tick = 0
+        # Per-token last-recorded timestamp for the _record_price throttle.
+        self._last_price_record_at: dict[str, float] = {}
 
     def close(self):
         self.executor.close()
@@ -156,6 +163,19 @@ class ScalperCopyMonitor:
             current_price = clob_exec.get_token_price_resilient(token_id, cid)
             if not current_price or current_price <= 0:
                 continue
+
+            # v3.1: throttled snapshot for audit visibility. Without this we
+            # only see prices on open/close events, leaving 80+ min gaps
+            # around game resolution — the exact window where SL decisions
+            # need review.
+            now_ts = time.time()
+            last = self._last_price_record_at.get(token_id, 0.0)
+            if now_ts - last >= _PRICE_SNAPSHOT_MIN_INTERVAL_S:
+                try:
+                    clob_exec._record_price(token_id, current_price, cid)
+                    self._last_price_record_at[token_id] = now_ts
+                except Exception as e:
+                    logger.debug(f"  snapshot throttle record failed {trade_id[:8]}: {e}")
 
             pct_change = (current_price - entry_price) / entry_price
             trailing_active = bool(metadata.get("trailing_active", False))

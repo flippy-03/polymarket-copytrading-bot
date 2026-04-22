@@ -37,12 +37,20 @@ class ClosureEvent:
     condition_id: str
 
 
+_PRICE_SNAPSHOT_MIN_INTERVAL_S = 180   # 3 min throttle per token
+
+
 class PositionManager:
     def __init__(self, gamma: GammaClient, run_id: str):
         self._gamma = gamma
         self._run_id = run_id
         self._ts_activation = C.TS_ACTIVATION
         self._ts_trail = C.TS_TRAIL_PCT
+        # In-memory map of token_id → last snapshot unix ts. Used by the
+        # _check_trade throttle to avoid flooding market_price_snapshots
+        # with one row per tick per open position. Lost on daemon restart
+        # (first tick after restart grabs a fresh snapshot — fine).
+        self._last_price_record_at: dict[str, float] = {}
 
     def check_all_open(self) -> list[ClosureEvent]:
         """
@@ -114,6 +122,21 @@ class PositionManager:
         current_price = clob_exec.get_token_price_resilient(token_id, cid)
         if not current_price or current_price <= 0:
             return None
+
+        # v3.1: record a snapshot to market_price_snapshots at most once every
+        # _PRICE_SNAPSHOT_MIN_INTERVAL_S per token. Without this we'd have no
+        # visibility of what the SL loop actually saw (the existing
+        # _record_price calls only happen on open/close events). Throttled to
+        # keep DB growth bounded (~+33 MB/month without throttle; ~+11 MB with
+        # 3 min throttle and the current workload).
+        now_ts = time.time()
+        last = self._last_price_record_at.get(token_id, 0.0)
+        if now_ts - last >= _PRICE_SNAPSHOT_MIN_INTERVAL_S:
+            try:
+                clob_exec._record_price(token_id, current_price, cid)
+                self._last_price_record_at[token_id] = now_ts
+            except Exception as e:
+                logger.debug(f"  snapshot throttle record failed {trade_id[:8]}: {e}")
 
         pct_change = (current_price - entry_price) / entry_price
 
