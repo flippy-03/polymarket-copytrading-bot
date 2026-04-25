@@ -70,6 +70,7 @@ class ScalperCopyMonitor:
             self.titulars[wallet] = {
                 "approved_market_types": r.get("approved_market_types") or [],
                 "per_trader_is_broken": r.get("per_trader_is_broken", False),
+                "is_forced": bool(r.get("is_forced", False)),
             }
         logger.info(
             f"ScalperCopyMonitor tracking {len(self.titulars)} titulars "
@@ -123,12 +124,14 @@ class ScalperCopyMonitor:
         """
         titular_info = self.titulars.get(titular, {})
         approved_types = titular_info.get("approved_market_types", [])
+        is_forced = titular_info.get("is_forced", False)
 
         # 1. Classify market type
         market_type = classify(trade)
 
-        # 2. Check if market type is approved for this titular
-        if market_type not in approved_types:
+        # 2. Check if market type is approved for this titular.
+        # Forced titulars bypass this filter — copy every market type.
+        if not is_forced and market_type not in approved_types:
             return False, "type_filtered"
 
         # 3. Check per-titular circuit breaker

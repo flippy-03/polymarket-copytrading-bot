@@ -212,13 +212,16 @@ class ScalperPoolSelector:
         try:
             old_rows = (
                 client.table("scalper_pool")
-                .select("wallet_address")
+                .select("wallet_address,is_forced")
                 .eq("run_id", self._run_id)
                 .eq("status", "ACTIVE_TITULAR")
                 .execute()
             ).data or []
             for row in old_rows:
                 w = row["wallet_address"]
+                if row.get("is_forced"):
+                    # Forced titulars survive selection re-runs.
+                    continue
                 if w not in new_wallets:
                     client.table("scalper_pool").update({"status": "POOL"}).eq(
                         "run_id", self._run_id

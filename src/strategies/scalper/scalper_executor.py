@@ -87,14 +87,15 @@ class ScalperExecutor:
         """Fetch the titular's approved_market_types from scalper_pool.
 
         Returns None if the lookup fails (allow-all fallback, we'd rather
-        copy than silently drop trades if the DB hiccups). Returns a set
-        otherwise — membership check in O(1) at call site.
+        copy than silently drop trades if the DB hiccups), or if the titular
+        is flagged is_forced (manual override — copy every market type).
+        Returns a set otherwise — membership check in O(1) at call site.
         """
         try:
             client = _db.get_client()
             row = (
                 client.table("scalper_pool")
-                .select("approved_market_types")
+                .select("approved_market_types,is_forced")
                 .eq("run_id", self.run_id)
                 .eq("wallet_address", titular)
                 .limit(1)
@@ -102,7 +103,10 @@ class ScalperExecutor:
                 .data
             )
             if row:
-                approved = (row[0] or {}).get("approved_market_types") or []
+                r = row[0] or {}
+                if r.get("is_forced"):
+                    return None
+                approved = r.get("approved_market_types") or []
                 if isinstance(approved, list) and approved:
                     return set(approved)
         except Exception as e:

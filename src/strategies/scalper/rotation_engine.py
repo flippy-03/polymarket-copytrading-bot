@@ -157,6 +157,11 @@ class RotationEngine:
         """
         wallet = titular["wallet_address"]
 
+        # 0. Forced (manual override) titulars are never auto-degraded.
+        # Operator clears is_forced to return them to normal lifecycle.
+        if titular.get("is_forced"):
+            return False, "FORCED"
+
         # 1. Per-titular CB already tripped
         if titular.get("per_trader_is_broken"):
             return True, "CONSECUTIVE_LOSSES"
